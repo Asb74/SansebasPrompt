@@ -6,7 +6,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
 from .motor import generar_prompt
@@ -20,11 +20,13 @@ from .storage import (
     cargar_perfiles,
     cargar_plantillas,
     eliminar_tarea,
+    insertar_registro_json,
     guardar_contextos,
     guardar_perfiles,
     guardar_plantillas,
     guardar_tarea,
     listar_tareas,
+    actualizar_registro_json,
 )
 
 BASE_FIELDS = [
@@ -188,6 +190,168 @@ class JsonListManagerDialog(tk.Toplevel):
         self.destroy()
 
 
+class ProfileEditorDialog(tk.Toplevel):
+    def __init__(self, master: tk.Widget, profile: dict | None = None) -> None:
+        super().__init__(master)
+        self.title("Perfil")
+        self.geometry("560x620")
+        self.transient(master)
+        self.grab_set()
+        self.result: dict | None = None
+
+        self.fields: dict[str, tk.Widget] = {}
+        form = ttk.Frame(self, padding=12)
+        form.pack(fill="both", expand=True)
+        form.columnconfigure(1, weight=1)
+
+        field_defs = [
+            ("nombre", "Nombre", False),
+            ("rol_base", "Rol base", False),
+            ("empresa", "Empresa", False),
+            ("ubicacion", "Ubicación", False),
+            ("herramientas", "Herramientas (una por línea)", True),
+            ("estilo", "Estilo", False),
+            ("nivel_tecnico", "Nivel técnico", False),
+            ("prioridades", "Prioridades", True),
+        ]
+
+        initial = dict(profile or {})
+        if "rol_base" not in initial and "rol" in initial:
+            initial["rol_base"] = initial.get("rol", "")
+
+        for idx, (key, label, multiline) in enumerate(field_defs):
+            ttk.Label(form, text=label).grid(row=idx, column=0, sticky="nw", pady=4, padx=(0, 8))
+            if multiline:
+                widget: tk.Widget = ScrolledText(form, height=4, wrap="word")
+                value = initial.get(key, [])
+                if isinstance(value, list):
+                    widget.insert("1.0", "\n".join(str(item) for item in value))
+                else:
+                    widget.insert("1.0", str(value))
+            else:
+                widget = ttk.Entry(form)
+                widget.insert(0, str(initial.get(key, "")))
+            widget.grid(row=idx, column=1, sticky="ew", pady=4)
+            self.fields[key] = widget
+
+        actions = ttk.Frame(form)
+        actions.grid(row=len(field_defs), column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(actions, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
+
+    @staticmethod
+    def _read(widget: tk.Widget) -> str:
+        if isinstance(widget, tk.Text):
+            return widget.get("1.0", "end").strip()
+        return widget.get().strip()
+
+    @staticmethod
+    def _split_lines(raw: str) -> list[str]:
+        return [line.strip() for line in raw.replace(",", "\n").splitlines() if line.strip()]
+
+    def _save(self) -> None:
+        payload = {key: self._read(widget) for key, widget in self.fields.items()}
+        if not payload["nombre"]:
+            messagebox.showwarning("Validación", "El nombre es obligatorio.", parent=self)
+            return
+        payload["herramientas"] = self._split_lines(payload.get("herramientas", ""))
+        payload["prioridades"] = self._split_lines(payload.get("prioridades", ""))
+        payload["rol"] = payload.get("rol_base", "")
+        self.result = payload
+        self.destroy()
+
+
+class ContextEditorDialog(tk.Toplevel):
+    def __init__(self, master: tk.Widget, context: dict | None = None) -> None:
+        super().__init__(master)
+        self.title("Contexto")
+        self.geometry("560x460")
+        self.transient(master)
+        self.grab_set()
+        self.result: dict | None = None
+
+        self.fields: dict[str, tk.Widget] = {}
+        form = ttk.Frame(self, padding=12)
+        form.pack(fill="both", expand=True)
+        form.columnconfigure(1, weight=1)
+
+        field_defs = [
+            ("nombre", "Nombre", False),
+            ("rol_contextual", "Rol contextual", False),
+            ("enfoque", "Enfoque (una por línea)", True),
+            ("no_hacer", "No hacer (una por línea)", True),
+        ]
+        initial = dict(context or {})
+
+        for idx, (key, label, multiline) in enumerate(field_defs):
+            ttk.Label(form, text=label).grid(row=idx, column=0, sticky="nw", pady=4, padx=(0, 8))
+            if multiline:
+                widget: tk.Widget = ScrolledText(form, height=5, wrap="word")
+                value = initial.get(key, [])
+                if isinstance(value, list):
+                    widget.insert("1.0", "\n".join(str(item) for item in value))
+                else:
+                    widget.insert("1.0", str(value))
+            else:
+                widget = ttk.Entry(form)
+                widget.insert(0, str(initial.get(key, "")))
+            widget.grid(row=idx, column=1, sticky="ew", pady=4)
+            self.fields[key] = widget
+
+        actions = ttk.Frame(form)
+        actions.grid(row=len(field_defs), column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(actions, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
+
+    @staticmethod
+    def _read(widget: tk.Widget) -> str:
+        if isinstance(widget, tk.Text):
+            return widget.get("1.0", "end").strip()
+        return widget.get().strip()
+
+    @staticmethod
+    def _split_lines(raw: str) -> list[str]:
+        return [line.strip() for line in raw.replace(",", "\n").splitlines() if line.strip()]
+
+    def _save(self) -> None:
+        payload = {key: self._read(widget) for key, widget in self.fields.items()}
+        if not payload["nombre"]:
+            messagebox.showwarning("Validación", "El nombre es obligatorio.", parent=self)
+            return
+        payload["enfoque"] = self._split_lines(payload.get("enfoque", ""))
+        payload["no_hacer"] = self._split_lines(payload.get("no_hacer", ""))
+        self.result = payload
+        self.destroy()
+
+
+class TemplateEditorDialog(tk.Toplevel):
+    def __init__(self, master: tk.Widget, template_name: str, content: str) -> None:
+        super().__init__(master)
+        self.title(f"Plantilla: {template_name}")
+        self.geometry("840x600")
+        self.transient(master)
+        self.grab_set()
+        self.content: str | None = None
+
+        frame = ttk.Frame(self, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self.editor = ScrolledText(frame, wrap="word")
+        self.editor.grid(row=0, column=0, sticky="nsew")
+        self.editor.insert("1.0", content)
+
+        actions = ttk.Frame(frame)
+        actions.grid(row=1, column=0, sticky="e", pady=(12, 0))
+        ttk.Button(actions, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
+
+    def _save(self) -> None:
+        self.content = self.editor.get("1.0", "end")
+        self.destroy()
+
+
 class HistoryWindow(tk.Toplevel):
     """Ventana de historial de tareas con acciones."""
 
@@ -301,7 +465,7 @@ class PromptEngineUI:
         archivo.add_command(label="Nuevo Contexto", command=self.new_context)
         archivo.add_command(label="Editar Contexto", command=self.edit_context)
         archivo.add_separator()
-        archivo.add_command(label="Nuevo Plantilla", command=self.new_template)
+        archivo.add_command(label="Nueva Plantilla", command=self.new_template)
         archivo.add_command(label="Editar Plantilla", command=self.edit_template)
         archivo.add_separator()
         archivo.add_command(label="Salir", command=self._on_close)
@@ -673,47 +837,144 @@ class PromptEngineUI:
             self._refresh_history()
             messagebox.showinfo("Historial", "Tarea eliminada correctamente.")
 
-    def _persist_records(self, path: Path, records: list[dict]) -> None:
-        if path == PERFILES_FILE:
-            future = self.executor.submit(guardar_perfiles, records)
-        elif path == CONTEXTOS_FILE:
-            future = self.executor.submit(guardar_contextos, records)
-        else:
-            future = self.executor.submit(guardar_plantillas, records)
-        self.root.after(40, lambda: self._poll_future(future, "Cambios guardados."))
-
-    def _manage_records(self, title: str, records: list[dict], path: Path, target: str) -> None:
-        modal = JsonListManagerDialog(self.root, title, records)
-        self.root.wait_window(modal)
-        if not modal.saved:
-            return
-
-        self._persist_records(path, modal.records)
-        if target == "perfiles":
-            self.perfiles = modal.records
-        elif target == "contextos":
-            self.contextos = modal.records
-        else:
-            self.plantillas = modal.records
+    def _refresh_data_sources(self) -> None:
+        self.perfiles = cargar_perfiles()
+        self.contextos = cargar_contextos()
+        self.plantillas = cargar_plantillas()
         self._reload_selectors()
 
+    def _select_name(self, title: str, options: list[str]) -> str | None:
+        if not options:
+            messagebox.showwarning(title, "No hay elementos disponibles.")
+            return None
+        selected = tk.StringVar(value=options[0])
+        modal = tk.Toplevel(self.root)
+        modal.title(title)
+        modal.transient(self.root)
+        modal.grab_set()
+
+        body = ttk.Frame(modal, padding=12)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Selecciona un elemento").pack(anchor="w")
+        combo = ttk.Combobox(body, values=options, textvariable=selected, state="readonly")
+        combo.pack(fill="x", pady=(6, 10))
+
+        result = {"name": None}
+
+        def accept() -> None:
+            result["name"] = selected.get().strip()
+            modal.destroy()
+
+        actions = ttk.Frame(body)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Cancelar", command=modal.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Editar", command=accept).pack(side="right")
+
+        self.root.wait_window(modal)
+        return result["name"]
+
     def new_profile(self) -> None:
-        self._manage_records("Gestión de perfiles", self.perfiles, PERFILES_FILE, "perfiles")
+        modal = ProfileEditorDialog(self.root)
+        self.root.wait_window(modal)
+        if not modal.result:
+            return
+        insertar_registro_json(PERFILES_FILE, modal.result)
+        self._refresh_data_sources()
 
     def edit_profile(self) -> None:
-        self._manage_records("Gestión de perfiles", self.perfiles, PERFILES_FILE, "perfiles")
+        self.perfiles = cargar_perfiles()
+        selected_name = self._select_name("Editar Perfil", [item.get("nombre", "") for item in self.perfiles])
+        if not selected_name:
+            return
+        profile = self._selected_item(self.perfiles, selected_name)
+        if not profile:
+            return
+        original_name = profile.get("nombre", "")
+        modal = ProfileEditorDialog(self.root, profile)
+        self.root.wait_window(modal)
+        if not modal.result:
+            return
+        updated = modal.result
+        if original_name != updated.get("nombre"):
+            perfiles = [item for item in self.perfiles if item.get("nombre") != original_name]
+            perfiles.append(updated)
+            guardar_perfiles(perfiles)
+        else:
+            actualizar_registro_json(PERFILES_FILE, original_name, updated)
+        self._refresh_data_sources()
 
     def new_context(self) -> None:
-        self._manage_records("Gestión de contextos", self.contextos, CONTEXTOS_FILE, "contextos")
+        modal = ContextEditorDialog(self.root)
+        self.root.wait_window(modal)
+        if not modal.result:
+            return
+        insertar_registro_json(CONTEXTOS_FILE, modal.result)
+        self._refresh_data_sources()
 
     def edit_context(self) -> None:
-        self._manage_records("Gestión de contextos", self.contextos, CONTEXTOS_FILE, "contextos")
+        self.contextos = cargar_contextos()
+        selected_name = self._select_name("Editar Contexto", [item.get("nombre", "") for item in self.contextos])
+        if not selected_name:
+            return
+        context = self._selected_item(self.contextos, selected_name)
+        if not context:
+            return
+        original_name = context.get("nombre", "")
+        modal = ContextEditorDialog(self.root, context)
+        self.root.wait_window(modal)
+        if not modal.result:
+            return
+        updated = modal.result
+        if original_name != updated.get("nombre"):
+            contextos = [item for item in self.contextos if item.get("nombre") != original_name]
+            contextos.append(updated)
+            guardar_contextos(contextos)
+        else:
+            actualizar_registro_json(CONTEXTOS_FILE, original_name, updated)
+        self._refresh_data_sources()
+
+    def _template_path(self, template_name: str) -> Path:
+        return PLANTILLAS_FILE.parent / f"{template_name}.py"
 
     def new_template(self) -> None:
-        self._manage_records("Gestión de plantillas", self.plantillas, PLANTILLAS_FILE, "plantillas")
+        template_name = simpledialog.askstring("Nueva Plantilla", "Nombre de plantilla (sin .py):", parent=self.root)
+        if not template_name:
+            return
+        template_name = template_name.strip().lower()
+        if not template_name:
+            return
+        tpl_path = self._template_path(template_name)
+        initial = '"""Plantilla personalizada PROM-9™."""\n\n' + (
+            "def render_custom(payload: dict[str, str]) -> str:\n"
+            "    return \"\"\n"
+        )
+        modal = TemplateEditorDialog(self.root, template_name, initial)
+        self.root.wait_window(modal)
+        if modal.content is None:
+            return
+        tpl_path.write_text(modal.content, encoding="utf-8")
+
+        plantillas = cargar_plantillas()
+        if not any(item.get("nombre") == template_name for item in plantillas):
+            plantillas.append({"nombre": template_name, "label": template_name.title(), "fields": [], "ejemplos": []})
+            guardar_plantillas(plantillas)
+        self._refresh_data_sources()
 
     def edit_template(self) -> None:
-        self._manage_records("Gestión de plantillas", self.plantillas, PLANTILLAS_FILE, "plantillas")
+        self.plantillas = cargar_plantillas()
+        selected_name = self._select_name("Editar Plantilla", [item.get("nombre", "") for item in self.plantillas])
+        if not selected_name:
+            return
+        tpl_path = self._template_path(selected_name)
+        if not tpl_path.exists():
+            messagebox.showerror("Plantillas", f"No existe el archivo: {tpl_path.name}")
+            return
+        modal = TemplateEditorDialog(self.root, selected_name, tpl_path.read_text(encoding="utf-8"))
+        self.root.wait_window(modal)
+        if modal.content is None:
+            return
+        tpl_path.write_text(modal.content, encoding="utf-8")
+        self._refresh_data_sources()
 
     def _on_close(self) -> None:
         self.executor.shutdown(wait=False, cancel_futures=True)

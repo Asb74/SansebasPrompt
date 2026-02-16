@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict
+from typing import Any, Dict
 
 from .plantillas.contabilidad import render_contabilidad
 from .plantillas.gestion import render_gestion
@@ -15,8 +15,18 @@ def _normalizar_area(area: str) -> str:
     return area.strip().lower()
 
 
-def generar_prompt(datos_tarea: Dict[str, str], perfil: Dict[str, str], contexto: Dict[str, str]) -> str:
+def _normalizar_especializacion_agricola(perfil: Dict[str, Any]) -> list[str]:
+    value = perfil.get("especializacion_agricola", [])
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.replace(",", "\n").splitlines() if line.strip()]
+    return []
+
+
+def generar_prompt(datos_tarea: Dict[str, str], perfil: Dict[str, Any], contexto: Dict[str, str]) -> str:
     """Selecciona plantilla por área y construye el prompt final."""
+    especializacion_agricola = _normalizar_especializacion_agricola(perfil)
     payload = {
         "perfil_nombre": perfil.get("nombre", "Usuario"),
         "perfil_rol": perfil.get("rol", "Profesional"),
@@ -27,6 +37,7 @@ def generar_prompt(datos_tarea: Dict[str, str], perfil: Dict[str, str], contexto
         "restricciones": datos_tarea.get("restricciones", ""),
         "formato_salida": datos_tarea.get("formato_salida", ""),
         "prioridad": datos_tarea.get("prioridad", "Media"),
+        "especializacion_agricola": especializacion_agricola,
     }
 
     area = _normalizar_area(datos_tarea.get("area", ""))

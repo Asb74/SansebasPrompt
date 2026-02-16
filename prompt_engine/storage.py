@@ -33,8 +33,29 @@ def _write_json(path: Path, payload: Any) -> None:
         json.dump(payload, fh, ensure_ascii=False, indent=2)
 
 
-def cargar_perfiles() -> List[Dict[str, str]]:
-    return _read_json(PERFILES_FILE, [])
+def _normalizar_lista_texto(value: Any) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.replace(",", "\n").splitlines() if line.strip()]
+    return []
+
+
+def _normalizar_perfil(profile: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(profile)
+    normalized["herramientas"] = _normalizar_lista_texto(profile.get("herramientas", []))
+    normalized["prioridades"] = _normalizar_lista_texto(profile.get("prioridades", []))
+    normalized["especializacion_agricola"] = _normalizar_lista_texto(profile.get("especializacion_agricola", []))
+    if "rol_base" not in normalized and "rol" in normalized:
+        normalized["rol_base"] = normalized.get("rol", "")
+    if "rol" not in normalized and "rol_base" in normalized:
+        normalized["rol"] = normalized.get("rol_base", "")
+    return normalized
+
+
+def cargar_perfiles() -> List[Dict[str, Any]]:
+    data = _read_json(PERFILES_FILE, [])
+    return [_normalizar_perfil(item) for item in data if isinstance(item, dict)]
 
 
 def cargar_contextos() -> List[Dict[str, str]]:
@@ -49,8 +70,8 @@ def guardar_plantillas(plantillas: List[Dict[str, Any]]) -> None:
     _write_json(PLANTILLAS_FILE, plantillas)
 
 
-def guardar_perfiles(perfiles: List[Dict[str, str]]) -> None:
-    _write_json(PERFILES_FILE, perfiles)
+def guardar_perfiles(perfiles: List[Dict[str, Any]]) -> None:
+    _write_json(PERFILES_FILE, [_normalizar_perfil(item) for item in perfiles])
 
 
 def guardar_contextos(contextos: List[Dict[str, str]]) -> None:

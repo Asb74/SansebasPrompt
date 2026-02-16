@@ -213,6 +213,7 @@ class ProfileEditorDialog(tk.Toplevel):
             ("estilo", "Estilo", False),
             ("nivel_tecnico", "Nivel técnico", False),
             ("prioridades", "Prioridades", True),
+            ("especializacion_agricola", "Especialización agrícola (una por línea)", True),
         ]
 
         initial = dict(profile or {})
@@ -256,6 +257,7 @@ class ProfileEditorDialog(tk.Toplevel):
             return
         payload["herramientas"] = self._split_lines(payload.get("herramientas", ""))
         payload["prioridades"] = self._split_lines(payload.get("prioridades", ""))
+        payload["especializacion_agricola"] = self._split_lines(payload.get("especializacion_agricola", ""))
         payload["rol"] = payload.get("rol_base", "")
         self.result = payload
         self.destroy()

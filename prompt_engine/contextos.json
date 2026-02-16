@@ -1,0 +1,22 @@
+[
+  {
+    "nombre": "comercial",
+    "rol_contextual": "Estratega de ventas",
+    "enfoque": "Captación y cierre"
+  },
+  {
+    "nombre": "it_senior",
+    "rol_contextual": "Arquitecto de soluciones",
+    "enfoque": "Escalabilidad y calidad técnica"
+  },
+  {
+    "nombre": "contable",
+    "rol_contextual": "Analista financiero",
+    "enfoque": "Cumplimiento y trazabilidad"
+  },
+  {
+    "nombre": "gestion",
+    "rol_contextual": "Coordinador de operaciones",
+    "enfoque": "Eficiencia operativa"
+  }
+]

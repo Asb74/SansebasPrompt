@@ -1,0 +1,54 @@
+[
+  {
+    "nombre": "it",
+    "label": "IT",
+    "fields": [
+      {"key": "stack", "label": "Stack tecnológico", "help": "Tecnologías disponibles o preferidas.", "example": "Python, FastAPI, PostgreSQL"},
+      {"key": "nivel_tecnico", "label": "Nivel técnico", "help": "Profundidad técnica requerida.", "example": "Intermedio con pasos reproducibles"}
+    ],
+    "ejemplos": [
+      "Automatización de reportes operativos con Python.",
+      "Diseño de arquitectura API con FastAPI y PostgreSQL.",
+      "Plan de observabilidad y logging para microservicios."
+    ]
+  },
+  {
+    "nombre": "ventas",
+    "label": "Ventas",
+    "fields": [
+      {"key": "segmento", "label": "Segmento", "help": "Cliente objetivo principal.", "example": "Pymes agroalimentarias"},
+      {"key": "propuesta_valor", "label": "Propuesta de valor", "help": "Beneficio diferencial.", "example": "Reducir costes operativos 20%"}
+    ],
+    "ejemplos": [
+      "Guion de negociación por margen con distribuidores.",
+      "Estrategia de salida de stock estancado.",
+      "Plan de fidelización para clientes de alto valor."
+    ]
+  },
+  {
+    "nombre": "contabilidad",
+    "label": "Contabilidad",
+    "fields": [
+      {"key": "normativa", "label": "Normativa", "help": "Marco contable aplicable.", "example": "PGC España"},
+      {"key": "periodo", "label": "Periodo", "help": "Periodo analizado.", "example": "Cierre mensual"}
+    ],
+    "ejemplos": [
+      "Checklist de cierre contable mensual.",
+      "Análisis de balance y ratios de liquidez.",
+      "Validación de cumplimiento normativo fiscal."
+    ]
+  },
+  {
+    "nombre": "gestion",
+    "label": "Gestión",
+    "fields": [
+      {"key": "area_operativa", "label": "Área operativa", "help": "Unidad organizativa implicada.", "example": "Operaciones"},
+      {"key": "horizonte", "label": "Horizonte", "help": "Plazo de implementación.", "example": "90 días"}
+    ],
+    "ejemplos": [
+      "Definición de KPIs de coordinación interáreas.",
+      "Rediseño de procesos para reducir cuellos de botella.",
+      "Plan operativo semanal con responsables y métricas."
+    ]
+  }
+]

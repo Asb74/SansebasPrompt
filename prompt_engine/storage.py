@@ -57,6 +57,24 @@ def guardar_contextos(contextos: List[Dict[str, str]]) -> None:
     _write_json(CONTEXTOS_FILE, contextos)
 
 
+def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -> bool:
+    """Actualiza un registro JSON por campo nombre."""
+    data = _read_json(path, [])
+    for idx, item in enumerate(data):
+        if item.get("nombre") == nombre:
+            data[idx] = payload
+            _write_json(path, data)
+            return True
+    return False
+
+
+def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
+    """Inserta un nuevo registro JSON en un listado."""
+    data = _read_json(path, [])
+    data.append(payload)
+    _write_json(path, data)
+
+
 def listar_tareas() -> List[Tarea]:
     data = _read_json(HISTORIAL_FILE, [])
     tareas = [Tarea.from_dict(item) for item in data]

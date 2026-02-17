@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
+from .attachments import validar_tipo_archivo
 from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
@@ -449,6 +450,7 @@ class PromptEngineUI:
 
         self.base_widgets: dict[str, tk.Widget] = {}
         self.template_widgets: dict[str, ttk.Entry] = {}
+        self.attachment_paths: list[Path] = []
 
         self._build_menu()
         self._build_ui()
@@ -513,8 +515,20 @@ class PromptEngineUI:
         self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.template_fields_frame.columnconfigure(1, weight=1)
 
+        attachments_frame = ttk.LabelFrame(left, text="Archivos adjuntos", padding=8)
+        attachments_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        attachments_frame.columnconfigure(0, weight=1)
+
+        attachments_buttons = ttk.Frame(attachments_frame)
+        attachments_buttons.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        ttk.Button(attachments_buttons, text="Adjuntar archivos", command=self.attach_files).pack(side="left")
+        ttk.Button(attachments_buttons, text="Eliminar seleccionado", command=self.remove_attachment).pack(side="left", padx=(6, 0))
+
+        self.attachments_listbox = tk.Listbox(attachments_frame, height=4, exportselection=False)
+        self.attachments_listbox.grid(row=1, column=0, sticky="ew")
+
         button_bar = ttk.Frame(left)
-        button_bar.grid(row=100, column=0, columnspan=2, pady=(14, 0))
+        button_bar.grid(row=101, column=0, columnspan=2, pady=(14, 0))
         ttk.Button(button_bar, text="GENERAR PROMPT", command=self.generate_prompt).pack(side="left", padx=6)
         ttk.Button(button_bar, text="Guardar", command=self.save_task).pack(side="left", padx=6)
         ttk.Button(button_bar, text="Exportar PDF", command=self.export_pdf).pack(side="left", padx=6)
@@ -671,7 +685,11 @@ class PromptEngineUI:
             return
 
         data = self._collect_form_data()
-        prompt = generar_prompt(data, perfil, contexto)
+        try:
+            prompt = generar_prompt(data, perfil, contexto, self.attachment_paths)
+        except RuntimeError as exc:
+            messagebox.showerror("Adjuntos", str(exc))
+            return
         self.prompt_box.delete("1.0", "end")
         self.prompt_box.insert("1.0", prompt)
 
@@ -687,6 +705,48 @@ class PromptEngineUI:
             prioridad=data.get("prioridad", "Media"),
             prompt_generado=prompt,
         )
+
+    def _refresh_attachment_list(self) -> None:
+        self.attachments_listbox.delete(0, "end")
+        for path in self.attachment_paths:
+            self.attachments_listbox.insert("end", path.name)
+
+    def attach_files(self) -> None:
+        filenames = filedialog.askopenfilenames(
+            title="Seleccionar archivos adjuntos",
+            filetypes=[
+                ("Archivos soportados", "*.py *.json *.txt *.md *.pdf"),
+                ("Python", "*.py"),
+                ("JSON", "*.json"),
+                ("Texto", "*.txt"),
+                ("Markdown", "*.md"),
+                ("PDF", "*.pdf"),
+            ],
+        )
+        if not filenames:
+            return
+
+        errores: list[str] = []
+        for filename in filenames:
+            path = Path(filename)
+            if not validar_tipo_archivo(path):
+                errores.append(f"Tipo no soportado: {path.name}")
+                continue
+            if path not in self.attachment_paths:
+                self.attachment_paths.append(path)
+
+        self._refresh_attachment_list()
+
+        if errores:
+            messagebox.showwarning("Adjuntos", "\n".join(errores))
+
+    def remove_attachment(self) -> None:
+        selection = self.attachments_listbox.curselection()
+        if not selection:
+            return
+        idx = selection[0]
+        self.attachment_paths.pop(idx)
+        self._refresh_attachment_list()
 
     def save_task(self) -> None:
         prompt = self.prompt_box.get("1.0", "end").strip()
@@ -773,6 +833,8 @@ class PromptEngineUI:
         self.current_task = task
         self.prompt_box.delete("1.0", "end")
         self.prompt_box.insert("1.0", task.prompt_generado)
+        self.attachment_paths = []
+        self._refresh_attachment_list()
 
     def _history_clone_task(self, task_id: str) -> None:
         source = self._task_by_id(task_id)
@@ -794,6 +856,8 @@ class PromptEngineUI:
         self.current_task = clone
         self.prompt_box.delete("1.0", "end")
         self.prompt_box.insert("1.0", clone.prompt_generado)
+        self.attachment_paths = []
+        self._refresh_attachment_list()
 
         if clone.usuario:
             self.perfil_var.set(clone.usuario)

@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict
 
+from .attachments import leer_archivos
 from .plantillas.contabilidad import render_contabilidad
 from .plantillas.gestion import render_gestion
 from .plantillas.it import render_it
 from .plantillas.ventas import render_ventas
+
+DIRECTRICES_TECNICAS_IT = """### Directrices obligatorias de análisis técnico
+
+- No asumir comportamiento de código no mostrado.
+- Señalar debilidades técnicas detectadas.
+- Indicar riesgos y problemas potenciales.
+- Si faltan archivos o funciones para análisis completo,
+  solicitarlos explícitamente antes de proponer solución final.
+- No validar decisiones por cortesía.
+- Mantener tono profesional, crítico y técnico.
+- No incluir elogios ni frases motivacionales.
+"""
 
 
 def _normalizar_area(area: str) -> str:
@@ -15,7 +29,12 @@ def _normalizar_area(area: str) -> str:
     return area.strip().lower()
 
 
-def generar_prompt(datos_tarea: Dict[str, str], perfil: Dict[str, str], contexto: Dict[str, str]) -> str:
+def generar_prompt(
+    datos_tarea: Dict[str, str],
+    perfil: Dict[str, str],
+    contexto: Dict[str, str],
+    adjuntos: list[Path] | None = None,
+) -> str:
     """Selecciona plantilla por área y construye el prompt final."""
     payload = {
         "perfil_nombre": perfil.get("nombre", "Usuario"),
@@ -37,28 +56,38 @@ def generar_prompt(datos_tarea: Dict[str, str], perfil: Dict[str, str], contexto
                 "nivel_tecnico": datos_tarea.get("nivel_tecnico", "Senior"),
             }
         )
-        return render_it(payload)
-    if area == "ventas":
+        prompt = render_it(payload)
+    elif area == "ventas":
         payload.update(
             {
                 "segmento": datos_tarea.get("segmento", "B2B"),
                 "propuesta_valor": datos_tarea.get("propuesta_valor", ""),
             }
         )
-        return render_ventas(payload)
-    if area == "contabilidad":
+        prompt = render_ventas(payload)
+    elif area == "contabilidad":
         payload.update(
             {
                 "normativa": datos_tarea.get("normativa", "PGC"),
                 "periodo": datos_tarea.get("periodo", ""),
             }
         )
-        return render_contabilidad(payload)
+        prompt = render_contabilidad(payload)
+    else:
+        payload.update(
+            {
+                "area_operativa": datos_tarea.get("area_operativa", "Operaciones"),
+                "horizonte": datos_tarea.get("horizonte", "Trimestral"),
+            }
+        )
+        prompt = render_gestion(payload)
 
-    payload.update(
-        {
-            "area_operativa": datos_tarea.get("area_operativa", "Operaciones"),
-            "horizonte": datos_tarea.get("horizonte", "Trimestral"),
-        }
-    )
-    return render_gestion(payload)
+    secciones_finales = [prompt]
+
+    if adjuntos:
+        secciones_finales.append(leer_archivos(adjuntos))
+
+    if area == "it":
+        secciones_finales.append(DIRECTRICES_TECNICAS_IT)
+
+    return "\n\n".join(seccion for seccion in secciones_finales if seccion.strip())

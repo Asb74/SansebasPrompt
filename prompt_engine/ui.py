@@ -477,59 +477,74 @@ class PromptEngineUI:
     def _build_ui(self) -> None:
         root_frame = ttk.Frame(self.root, padding=12)
         root_frame.pack(fill="both", expand=True)
-        root_frame.columnconfigure(0, weight=3)
-        root_frame.columnconfigure(1, weight=2)
+        root_frame.columnconfigure(0, weight=1)
         root_frame.rowconfigure(0, weight=3)
         root_frame.rowconfigure(1, weight=2)
         root_frame.rowconfigure(2, weight=0)
 
-        left = ttk.LabelFrame(root_frame, text="Formulario", padding=10)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
-        left.columnconfigure(1, weight=1)
+        main_paned = ttk.PanedWindow(root_frame, orient="horizontal")
+        main_paned.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
 
-        ttk.Label(left, text="Perfil").grid(row=0, column=0, sticky="w", pady=4)
-        self.perfil_combo = ttk.Combobox(left, textvariable=self.perfil_var, state="readonly")
+        left_panel = ttk.Frame(main_paned)
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.rowconfigure(0, weight=1)
+        main_paned.add(left_panel, weight=3)
+
+        left = ttk.LabelFrame(left_panel, text="Formulario", padding=10)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        left.columnconfigure(0, weight=1)
+        left.rowconfigure(0, weight=1)
+
+        form_canvas = tk.Canvas(left, highlightthickness=0)
+        form_canvas.grid(row=0, column=0, sticky="nsew")
+        form_scrollbar = ttk.Scrollbar(left, orient="vertical", command=form_canvas.yview)
+        form_scrollbar.grid(row=0, column=1, sticky="ns")
+        form_canvas.configure(yscrollcommand=form_scrollbar.set)
+
+        form_inner = ttk.Frame(form_canvas)
+        form_inner.columnconfigure(1, weight=1)
+        form_window = form_canvas.create_window((0, 0), window=form_inner, anchor="nw")
+
+        def _on_form_configure(_event: tk.Event) -> None:
+            form_canvas.configure(scrollregion=form_canvas.bbox("all"))
+
+        def _on_canvas_configure(event: tk.Event) -> None:
+            form_canvas.itemconfigure(form_window, width=event.width)
+
+        form_inner.bind("<Configure>", _on_form_configure)
+        form_canvas.bind("<Configure>", _on_canvas_configure)
+
+        ttk.Label(form_inner, text="Perfil").grid(row=0, column=0, sticky="w", pady=4)
+        self.perfil_combo = ttk.Combobox(form_inner, textvariable=self.perfil_var, state="readonly")
         self.perfil_combo.grid(row=0, column=1, sticky="ew", pady=4)
 
-        ttk.Label(left, text="Contexto").grid(row=1, column=0, sticky="w", pady=4)
-        self.contexto_combo = ttk.Combobox(left, textvariable=self.contexto_var, state="readonly")
+        ttk.Label(form_inner, text="Contexto").grid(row=1, column=0, sticky="w", pady=4)
+        self.contexto_combo = ttk.Combobox(form_inner, textvariable=self.contexto_var, state="readonly")
         self.contexto_combo.grid(row=1, column=1, sticky="ew", pady=4)
 
-        ttk.Label(left, text="Plantilla").grid(row=2, column=0, sticky="w", pady=4)
-        self.template_combo = ttk.Combobox(left, textvariable=self.template_var, state="readonly")
+        ttk.Label(form_inner, text="Plantilla").grid(row=2, column=0, sticky="w", pady=4)
+        self.template_combo = ttk.Combobox(form_inner, textvariable=self.template_var, state="readonly")
         self.template_combo.grid(row=2, column=1, sticky="ew", pady=4)
         self.template_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_template_changed())
 
         start_row = 3
         for offset, (field, label) in enumerate(BASE_FIELDS):
             row = start_row + offset
-            ttk.Label(left, text=label).grid(row=row, column=0, sticky="nw", pady=4)
+            ttk.Label(form_inner, text=label).grid(row=row, column=0, sticky="nw", pady=4)
             if field in {"contexto_detallado", "restricciones"}:
-                widget: tk.Widget = ScrolledText(left, height=4, wrap="word")
+                widget: tk.Widget = ScrolledText(form_inner, height=4, wrap="word")
             else:
-                widget = ttk.Entry(left)
+                widget = ttk.Entry(form_inner)
             widget.grid(row=row, column=1, sticky="ew", pady=4)
             self.base_widgets[field] = widget
             widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
 
-        self.template_fields_frame = ttk.LabelFrame(left, text="Campos de plantilla", padding=8)
+        self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
         self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.template_fields_frame.columnconfigure(1, weight=1)
 
-        attachments_frame = ttk.LabelFrame(left, text="Archivos adjuntos", padding=8)
-        attachments_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        attachments_frame.columnconfigure(0, weight=1)
-
-        attachments_buttons = ttk.Frame(attachments_frame)
-        attachments_buttons.grid(row=0, column=0, sticky="w", pady=(0, 6))
-        ttk.Button(attachments_buttons, text="Adjuntar archivos", command=self.attach_files).pack(side="left")
-        ttk.Button(attachments_buttons, text="Eliminar seleccionado", command=self.remove_attachment).pack(side="left", padx=(6, 0))
-
-        self.attachments_listbox = tk.Listbox(attachments_frame, height=4, exportselection=False)
-        self.attachments_listbox.grid(row=1, column=0, sticky="ew")
-
-        right = ttk.LabelFrame(root_frame, text="Panel contextual dinámico", padding=10)
-        right.grid(row=0, column=1, sticky="nsew", pady=(0, 8))
+        right = ttk.LabelFrame(main_paned, text="Panel contextual dinámico", padding=10)
+        main_paned.add(right, weight=2)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
 
@@ -543,16 +558,45 @@ class PromptEngineUI:
         self.context_text.grid(row=2, column=0, sticky="nsew")
         self.context_text.configure(state="disabled")
 
-        bottom = ttk.LabelFrame(root_frame, text="Salida de prompt (editable)", padding=10)
-        bottom.grid(row=1, column=0, columnspan=2, sticky="nsew")
-        bottom.columnconfigure(0, weight=1)
-        bottom.rowconfigure(0, weight=1)
+        output_tabs = ttk.Notebook(root_frame)
+        output_tabs.grid(row=1, column=0, sticky="nsew")
 
-        self.prompt_box = ScrolledText(bottom, wrap="word")
+        prompt_tab = ttk.Frame(output_tabs)
+        prompt_tab.columnconfigure(0, weight=1)
+        prompt_tab.rowconfigure(0, weight=1)
+        output_tabs.add(prompt_tab, text="Prompt generado")
+
+        self.prompt_box = ScrolledText(prompt_tab, wrap="word")
         self.prompt_box.grid(row=0, column=0, sticky="nsew")
 
+        attachments_tab = ttk.Frame(output_tabs)
+        attachments_tab.columnconfigure(0, weight=1)
+        attachments_tab.rowconfigure(0, weight=1)
+        output_tabs.add(attachments_tab, text="Archivos adjuntos")
+
+        attachments_frame = ttk.LabelFrame(attachments_tab, text="Archivos adjuntos", padding=8)
+        attachments_frame.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        attachments_frame.columnconfigure(0, weight=1)
+        attachments_frame.rowconfigure(1, weight=1)
+
+        attachments_buttons = ttk.Frame(attachments_frame)
+        attachments_buttons.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        ttk.Button(attachments_buttons, text="Adjuntar archivos", command=self.attach_files).pack(side="left")
+        ttk.Button(attachments_buttons, text="Eliminar seleccionado", command=self.remove_attachment).pack(side="left", padx=(6, 0))
+
+        self.attachments_listbox = tk.Listbox(attachments_frame, height=4, exportselection=False)
+        self.attachments_listbox.grid(row=1, column=0, sticky="nsew")
+
+        history_tab = ttk.Frame(output_tabs)
+        history_tab.columnconfigure(0, weight=1)
+        history_tab.rowconfigure(0, weight=1)
+        output_tabs.add(history_tab, text="Historial rápido")
+        ttk.Label(history_tab, text="Historial rápido disponible próximamente.").grid(
+            row=0, column=0, sticky="nw", padx=12, pady=12
+        )
+
         actions_row = ttk.Frame(root_frame)
-        actions_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(actions_row, text="Generar Prompt", command=self._generate_prompt).pack(side="left", padx=(0, 6))
         ttk.Button(actions_row, text="Guardar", command=self._save_prompt).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Exportar PDF", command=self._export_pdf).pack(side="left", padx=6)

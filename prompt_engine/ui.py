@@ -481,6 +481,7 @@ class PromptEngineUI:
         root_frame.columnconfigure(1, weight=2)
         root_frame.rowconfigure(0, weight=3)
         root_frame.rowconfigure(1, weight=2)
+        root_frame.rowconfigure(2, weight=0)
 
         left = ttk.LabelFrame(root_frame, text="Formulario", padding=10)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
@@ -527,13 +528,6 @@ class PromptEngineUI:
         self.attachments_listbox = tk.Listbox(attachments_frame, height=4, exportselection=False)
         self.attachments_listbox.grid(row=1, column=0, sticky="ew")
 
-        button_bar = ttk.Frame(left)
-        button_bar.grid(row=101, column=0, columnspan=2, pady=(14, 0))
-        ttk.Button(button_bar, text="GENERAR PROMPT", command=self.generate_prompt).pack(side="left", padx=6)
-        ttk.Button(button_bar, text="Guardar", command=self.save_task).pack(side="left", padx=6)
-        ttk.Button(button_bar, text="Exportar PDF", command=self.export_pdf).pack(side="left", padx=6)
-        ttk.Button(button_bar, text="HISTORIAL", command=self.show_history).pack(side="left", padx=6)
-
         right = ttk.LabelFrame(root_frame, text="Panel contextual dinámico", padding=10)
         right.grid(row=0, column=1, sticky="nsew", pady=(0, 8))
         right.columnconfigure(0, weight=1)
@@ -556,6 +550,25 @@ class PromptEngineUI:
 
         self.prompt_box = ScrolledText(bottom, wrap="word")
         self.prompt_box.grid(row=0, column=0, sticky="nsew")
+
+        actions_row = ttk.Frame(root_frame)
+        actions_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(actions_row, text="Generar Prompt", command=self._generate_prompt).pack(side="left", padx=(0, 6))
+        ttk.Button(actions_row, text="Guardar", command=self._save_prompt).pack(side="left", padx=6)
+        ttk.Button(actions_row, text="Exportar PDF", command=self._export_pdf).pack(side="left", padx=6)
+        ttk.Button(actions_row, text="Historial", command=self._open_history).pack(side="left", padx=6)
+
+    def _generate_prompt(self) -> None:
+        self.generate_prompt()
+
+    def _save_prompt(self) -> None:
+        self.save_task()
+
+    def _export_pdf(self) -> None:
+        self.export_pdf()
+
+    def _open_history(self) -> None:
+        self.show_history()
 
     def _selected_template(self) -> dict:
         wanted = self.template_var.get()

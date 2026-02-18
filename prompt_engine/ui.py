@@ -10,6 +10,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 
+from .widgets import DictationField
+
 from .attachments import validar_tipo_archivo
 from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
@@ -472,10 +474,6 @@ class PromptEngineUI:
                 "Dictado deshabilitado: faltan dependencias opcionales "
                 "(sounddevice, numpy u openai)."
             )
-        self.voice_button = None
-        self.voice_status_var = tk.StringVar(value="")
-        self._dictation_target: tk.Widget | None = None
-        self._editable_widgets: set[tk.Widget] = set()
 
         self.perfiles = cargar_perfiles()
         self.contextos = cargar_contextos()
@@ -487,7 +485,7 @@ class PromptEngineUI:
         self.contexto_var = tk.StringVar()
         self.template_var = tk.StringVar()
 
-        self.base_widgets: dict[str, tk.Widget] = {}
+        self.base_widgets: dict[str, tk.Widget | DictationField] = {}
         self.template_widgets: dict[str, ttk.Entry] = {}
         self.attachment_paths: list[Path] = []
 
@@ -513,8 +511,6 @@ class PromptEngineUI:
         menubar.add_cascade(label="Archivo", menu=archivo)
         self.root.config(menu=menubar)
 
-    def _register_editable_widget(self, widget: tk.Widget) -> None:
-        self._editable_widgets.add(widget)
 
     def _build_ui(self) -> None:
         root_frame = ttk.Frame(self.root, padding=12)
@@ -574,13 +570,17 @@ class PromptEngineUI:
             row = start_row + offset
             ttk.Label(form_inner, text=label).grid(row=row, column=0, sticky="nw", pady=4)
             if field in {"contexto_detallado", "restricciones"}:
-                widget: tk.Widget = ScrolledText(form_inner, height=4, wrap="word")
+                widget: tk.Widget | DictationField = DictationField(
+                    form_inner,
+                    self.voice_input,
+                    multiline=True,
+                )
             else:
                 widget = ttk.Entry(form_inner)
-            self._register_editable_widget(widget)
             widget.grid(row=row, column=1, sticky="ew", pady=4)
             self.base_widgets[field] = widget
-            widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
+            focus_widget = widget.get_widget() if isinstance(widget, DictationField) else widget
+            focus_widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
 
         self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
         self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -609,8 +609,7 @@ class PromptEngineUI:
         prompt_tab.rowconfigure(0, weight=1)
         output_tabs.add(prompt_tab, text="Prompt generado")
 
-        self.prompt_box = ScrolledText(prompt_tab, wrap="word")
-        self._register_editable_widget(self.prompt_box)
+        self.prompt_box = DictationField(prompt_tab, self.voice_input, multiline=True)
         self.prompt_box.grid(row=0, column=0, sticky="nsew")
 
         attachments_tab = ttk.Frame(output_tabs)
@@ -645,15 +644,7 @@ class PromptEngineUI:
         ttk.Button(actions_row, text="Guardar", command=self._save_prompt).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Exportar PDF", command=self._export_pdf).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Historial", command=self._open_history).pack(side="left", padx=6)
-        self.voice_button = ttk.Button(actions_row, text="🎙 Dictar", command=self._toggle_dictation)
-        self.voice_button.pack(side="left", padx=6)
-        ttk.Label(actions_row, textvariable=self.voice_status_var).pack(side="left", padx=(8, 0))
         ttk.Button(actions_row, text="📋 Copiar Prompt", command=self._copy_prompt).pack(side="left", padx=6)
-
-        if self.voice_button and self.voice_input is None:
-            self.voice_button.configure(state="disabled")
-            if self.voice_error_message:
-                self.voice_status_var.set(self.voice_error_message)
 
     def _generate_prompt(self) -> None:
         self.generate_prompt()
@@ -667,102 +658,8 @@ class PromptEngineUI:
     def _open_history(self) -> None:
         self.show_history()
 
-    def _toggle_dictation(self) -> None:
-        if self.voice_input is None:
-            messagebox.showinfo(
-                "Dictado",
-                self.voice_error_message or "El dictado no está disponible en este entorno.",
-            )
-            return
-        if self.voice_input.is_recording:
-            self._stop_dictation()
-        else:
-            self._start_dictation()
-
-    def _start_dictation(self) -> None:
-        try:
-            target = self.root.focus_get()
-
-            if target is None:
-                messagebox.showwarning("Dictado", "Selecciona primero un campo de texto editable.")
-                return
-
-            try:
-                if not bool(target.winfo_exists()):
-                    messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-                    return
-            except tk.TclError:
-                messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-                return
-
-            if target not in self._editable_widgets:
-                messagebox.showwarning("Dictado", "Selecciona primero un campo de texto editable.")
-                return
-
-            self._dictation_target = target
-            self.voice_input.start_recording()
-            if self.voice_button:
-                self.voice_button.configure(text="⏹ Detener")
-            self.voice_status_var.set("Grabando...")
-        except Exception as exc:
-            messagebox.showerror("Dictado", str(exc))
-
-    def _stop_dictation(self) -> None:
-        try:
-            self.voice_status_var.set("Transcribiendo...")
-            self.executor.submit(self._process_transcription)
-        except Exception as exc:
-            messagebox.showerror("Dictado", str(exc))
-
-    def _process_transcription(self) -> None:
-        try:
-            text = self.voice_input.stop_recording()
-            self.root.after(0, lambda: self._insert_transcription(text))
-        except Exception as exc:
-            self.root.after(0, lambda: messagebox.showerror("Dictado", str(exc)))
-
-    def _insert_transcription(self, text: str) -> None:
-        if self.voice_button:
-            self.voice_button.configure(text="🎙 Dictar")
-        self.voice_status_var.set("")
-
-        target = self._dictation_target
-
-        if not text:
-            messagebox.showwarning("Dictado", "No se detectó texto.")
-            self._dictation_target = None
-            return
-
-        if target is None:
-            messagebox.showwarning(
-                "Dictado",
-                "Selecciona primero un campo de texto editable.",
-            )
-            self._dictation_target = None
-            return
-
-        try:
-            if not bool(target.winfo_exists()):
-                messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-                self._dictation_target = None
-                return
-        except tk.TclError:
-            messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-            self._dictation_target = None
-            return
-
-        try:
-            target.insert("insert", text)
-        except Exception:
-            messagebox.showwarning(
-                "Dictado",
-                "No se pudo insertar el texto en el campo seleccionado.",
-            )
-
-        self._dictation_target = None
-
     def _copy_prompt(self) -> None:
-        prompt = self.prompt_box.get("1.0", "end").strip()
+        prompt = self.prompt_box.get_text()
         if not prompt:
             messagebox.showwarning("Copiar", "No hay prompt generado.")
             return
@@ -814,8 +711,6 @@ class PromptEngineUI:
         self._update_context_panel("titulo")
 
     def _render_template_fields(self) -> None:
-        for entry in self.template_widgets.values():
-            self._editable_widgets.discard(entry)
         for widget in self.template_fields_frame.winfo_children():
             widget.destroy()
         self.template_widgets.clear()
@@ -828,7 +723,6 @@ class PromptEngineUI:
             label = field.get("label", key)
             ttk.Label(self.template_fields_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.template_fields_frame)
-            self._register_editable_widget(entry)
             entry.grid(row=idx, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
             self.template_widgets[key] = entry
@@ -861,7 +755,9 @@ class PromptEngineUI:
         return None
 
     @staticmethod
-    def _read_widget(widget: tk.Widget) -> str:
+    def _read_widget(widget: tk.Widget | DictationField) -> str:
+        if isinstance(widget, DictationField):
+            return widget.get_text()
         if isinstance(widget, tk.Text):
             return widget.get("1.0", "end").strip()
         return widget.get().strip()
@@ -907,8 +803,7 @@ class PromptEngineUI:
         except RuntimeError as exc:
             messagebox.showerror("Adjuntos", str(exc))
             return
-        self.prompt_box.delete("1.0", "end")
-        self.prompt_box.insert("1.0", prompt)
+        self.prompt_box.set_text(prompt)
 
         self.current_task = Tarea(
             id=generate_task_id(),
@@ -966,7 +861,7 @@ class PromptEngineUI:
         self._refresh_attachment_list()
 
     def save_task(self) -> None:
-        prompt = self.prompt_box.get("1.0", "end").strip()
+        prompt = self.prompt_box.get_text()
         if not prompt:
             messagebox.showwarning("Sin prompt", "Genera o escribe un prompt antes de guardar.")
             return
@@ -994,7 +889,7 @@ class PromptEngineUI:
         self.root.after(40, lambda: self._poll_future(future, "Tarea guardada correctamente."))
 
     def export_pdf(self) -> None:
-        prompt = self.prompt_box.get("1.0", "end").strip()
+        prompt = self.prompt_box.get_text()
         if not prompt:
             messagebox.showwarning("Sin contenido", "No hay prompt para exportar.")
             return
@@ -1048,8 +943,7 @@ class PromptEngineUI:
         if not task:
             return
         self.current_task = task
-        self.prompt_box.delete("1.0", "end")
-        self.prompt_box.insert("1.0", task.prompt_generado)
+        self.prompt_box.set_text(task.prompt_generado)
         self.attachment_paths = []
         self._refresh_attachment_list()
 
@@ -1071,8 +965,7 @@ class PromptEngineUI:
             prompt_generado=source.prompt_generado,
         )
         self.current_task = clone
-        self.prompt_box.delete("1.0", "end")
-        self.prompt_box.insert("1.0", clone.prompt_generado)
+        self.prompt_box.set_text(clone.prompt_generado)
         self.attachment_paths = []
         self._refresh_attachment_list()
 

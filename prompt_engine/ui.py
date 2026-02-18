@@ -475,6 +475,7 @@ class PromptEngineUI:
         self.voice_button = None
         self.voice_status_var = tk.StringVar(value="")
         self._dictation_target: tk.Widget | None = None
+        self._editable_widgets: set[tk.Widget] = set()
 
         self.perfiles = cargar_perfiles()
         self.contextos = cargar_contextos()
@@ -511,6 +512,9 @@ class PromptEngineUI:
         archivo.add_command(label="Salir", command=self._on_close)
         menubar.add_cascade(label="Archivo", menu=archivo)
         self.root.config(menu=menubar)
+
+    def _register_editable_widget(self, widget: tk.Widget) -> None:
+        self._editable_widgets.add(widget)
 
     def _build_ui(self) -> None:
         root_frame = ttk.Frame(self.root, padding=12)
@@ -573,6 +577,7 @@ class PromptEngineUI:
                 widget: tk.Widget = ScrolledText(form_inner, height=4, wrap="word")
             else:
                 widget = ttk.Entry(form_inner)
+            self._register_editable_widget(widget)
             widget.grid(row=row, column=1, sticky="ew", pady=4)
             self.base_widgets[field] = widget
             widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
@@ -605,6 +610,7 @@ class PromptEngineUI:
         output_tabs.add(prompt_tab, text="Prompt generado")
 
         self.prompt_box = ScrolledText(prompt_tab, wrap="word")
+        self._register_editable_widget(self.prompt_box)
         self.prompt_box.grid(row=0, column=0, sticky="nsew")
 
         attachments_tab = ttk.Frame(output_tabs)
@@ -689,11 +695,7 @@ class PromptEngineUI:
                 messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
                 return
 
-            if isinstance(target, ttk.Combobox):
-                messagebox.showwarning("Dictado", "No se puede dictar en campos desplegables.")
-                return
-
-            if not hasattr(target, "insert"):
+            if target not in self._editable_widgets:
                 messagebox.showwarning("Dictado", "Selecciona primero un campo de texto editable.")
                 return
 
@@ -746,14 +748,6 @@ class PromptEngineUI:
                 return
         except tk.TclError:
             messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-            self._dictation_target = None
-            return
-
-        if not hasattr(target, "insert"):
-            messagebox.showwarning(
-                "Dictado",
-                "Selecciona primero un campo de texto editable.",
-            )
             self._dictation_target = None
             return
 
@@ -820,6 +814,8 @@ class PromptEngineUI:
         self._update_context_panel("titulo")
 
     def _render_template_fields(self) -> None:
+        for entry in self.template_widgets.values():
+            self._editable_widgets.discard(entry)
         for widget in self.template_fields_frame.winfo_children():
             widget.destroy()
         self.template_widgets.clear()
@@ -832,6 +828,7 @@ class PromptEngineUI:
             label = field.get("label", key)
             ttk.Label(self.template_fields_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.template_fields_frame)
+            self._register_editable_widget(entry)
             entry.grid(row=idx, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
             self.template_widgets[key] = entry

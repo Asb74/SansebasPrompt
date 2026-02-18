@@ -676,13 +676,24 @@ class PromptEngineUI:
     def _start_dictation(self) -> None:
         try:
             target = self.root.focus_get()
-            editable_types = (ttk.Entry, tk.Entry, tk.Text, ScrolledText)
+
+            if target is None:
+                messagebox.showwarning("Dictado", "Selecciona primero un campo de texto editable.")
+                return
+
+            try:
+                if not bool(target.winfo_exists()):
+                    messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
+                    return
+            except tk.TclError:
+                messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
+                return
 
             if isinstance(target, ttk.Combobox):
                 messagebox.showwarning("Dictado", "No se puede dictar en campos desplegables.")
                 return
 
-            if not isinstance(target, editable_types):
+            if not hasattr(target, "insert"):
                 messagebox.showwarning("Dictado", "Selecciona primero un campo de texto editable.")
                 return
 
@@ -735,14 +746,6 @@ class PromptEngineUI:
                 return
         except tk.TclError:
             messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
-            self._dictation_target = None
-            return
-
-        if isinstance(target, ttk.Combobox):
-            messagebox.showwarning(
-                "Dictado",
-                "No se puede dictar en campos desplegables.",
-            )
             self._dictation_target = None
             return
 

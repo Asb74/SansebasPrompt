@@ -29,6 +29,7 @@ from .storage import (
     listar_tareas,
     actualizar_registro_json,
 )
+from .voice_input import VoiceInput
 
 BASE_FIELDS = [
     ("titulo", "Título"),
@@ -437,6 +438,9 @@ class PromptEngineUI:
         self.root.geometry("1280x860")
 
         self.executor = ThreadPoolExecutor(max_workers=2)
+        self.voice_input = VoiceInput()
+        self.voice_button = None
+        self.voice_status_var = tk.StringVar(value="")
 
         self.perfiles = cargar_perfiles()
         self.contextos = cargar_contextos()
@@ -601,6 +605,10 @@ class PromptEngineUI:
         ttk.Button(actions_row, text="Guardar", command=self._save_prompt).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Exportar PDF", command=self._export_pdf).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Historial", command=self._open_history).pack(side="left", padx=6)
+        self.voice_button = ttk.Button(actions_row, text="🎙 Dictar", command=self._toggle_dictation)
+        self.voice_button.pack(side="left", padx=6)
+        ttk.Label(actions_row, textvariable=self.voice_status_var).pack(side="left", padx=(8, 0))
+        ttk.Button(actions_row, text="📋 Copiar Prompt", command=self._copy_prompt).pack(side="left", padx=6)
 
     def _generate_prompt(self) -> None:
         self.generate_prompt()
@@ -613,6 +621,70 @@ class PromptEngineUI:
 
     def _open_history(self) -> None:
         self.show_history()
+
+    def _toggle_dictation(self) -> None:
+        if self.voice_input.is_recording:
+            self._stop_dictation()
+        else:
+            self._start_dictation()
+
+    def _start_dictation(self) -> None:
+        try:
+            self.voice_input.start_recording()
+            if self.voice_button:
+                self.voice_button.configure(text="⏹ Detener")
+            self.voice_status_var.set("Grabando...")
+        except Exception as exc:
+            messagebox.showerror("Dictado", str(exc))
+
+    def _stop_dictation(self) -> None:
+        try:
+            self.voice_status_var.set("Transcribiendo...")
+            self.executor.submit(self._process_transcription)
+        except Exception as exc:
+            messagebox.showerror("Dictado", str(exc))
+
+    def _process_transcription(self) -> None:
+        try:
+            text = self.voice_input.stop_recording()
+            self.root.after(0, lambda: self._insert_transcription(text))
+        except Exception as exc:
+            self.root.after(0, lambda: messagebox.showerror("Dictado", str(exc)))
+
+    def _insert_transcription(self, text: str) -> None:
+        if self.voice_button:
+            self.voice_button.configure(text="🎙 Dictar")
+        self.voice_status_var.set("")
+
+        if not text:
+            messagebox.showwarning("Dictado", "No se detectó texto.")
+            return
+
+        target = self.root.focus_get()
+
+        if isinstance(target, ttk.Combobox):
+            messagebox.showwarning("Dictado", "No se puede dictar en campos desplegables.")
+            return
+
+        if isinstance(target, ttk.Entry) or isinstance(target, tk.Entry):
+            target.insert(target.index("insert"), text)
+            return
+
+        if isinstance(target, tk.Text):
+            target.insert("insert", text)
+            return
+
+        messagebox.showwarning("Dictado", "Selecciona un campo de texto editable.")
+
+    def _copy_prompt(self) -> None:
+        prompt = self.prompt_box.get("1.0", "end").strip()
+        if not prompt:
+            messagebox.showwarning("Copiar", "No hay prompt generado.")
+            return
+
+        self.root.clipboard_clear()
+        self.root.clipboard_append(prompt)
+        messagebox.showinfo("Copiar", "Prompt copiado al portapapeles.")
 
     def _selected_template(self) -> dict:
         wanted = self.template_var.get()
@@ -1098,6 +1170,11 @@ class PromptEngineUI:
         self._refresh_data_sources()
 
     def _on_close(self) -> None:
+        try:
+            if self.voice_input.is_recording:
+                self.voice_input.stop_recording()
+        except Exception:
+            pass
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.root.destroy()
 

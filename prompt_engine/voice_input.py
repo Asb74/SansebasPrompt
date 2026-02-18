@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tempfile
 import wave
 from threading import Lock
+from time import monotonic
 from typing import Optional
 
 import numpy as np
@@ -19,10 +21,27 @@ class VoiceInput:
     def __init__(self, sample_rate: int = 16_000, channels: int = 1) -> None:
         self.sample_rate = sample_rate
         self.channels = channels
+        self.max_seconds = 120
         self._is_recording = False
         self._audio_chunks: list[np.ndarray] = []
         self._lock = Lock()
         self._stream: Optional[sd.InputStream] = None
+        self._recording_started_at: Optional[float] = None
+
+        if hasattr(sys, "_MEIPASS"):
+            base_path = Path(sys._MEIPASS)
+        else:
+            base_path = Path(__file__).resolve().parent
+
+        api_key_path = base_path / "KeySecret.txt"
+        if not api_key_path.exists():
+            raise RuntimeError("No se encontró la API key en prompt_engine/KeySecret.txt.")
+
+        api_key = api_key_path.read_text(encoding="utf-8").strip()
+        if not api_key:
+            raise RuntimeError("La API key en prompt_engine/KeySecret.txt está vacía.")
+
+        self._client = OpenAI(api_key=api_key)
 
     @property
     def is_recording(self) -> bool:
@@ -42,10 +61,16 @@ class VoiceInput:
         with self._lock:
             self._audio_chunks = []
 
+        self._recording_started_at = monotonic()
+
         def _callback(indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags) -> None:
             _ = (frames, time)
             if status:
                 return
+            if self._recording_started_at is not None:
+                elapsed = monotonic() - self._recording_started_at
+                if elapsed >= self.max_seconds:
+                    raise sd.CallbackStop
             with self._lock:
                 self._audio_chunks.append(indata.copy())
 
@@ -61,6 +86,7 @@ class VoiceInput:
         except Exception as exc:
             self._stream = None
             self._is_recording = False
+            self._recording_started_at = None
             raise RuntimeError("No fue posible iniciar la grabación de audio.") from exc
 
     def stop_recording(self) -> str:
@@ -74,6 +100,7 @@ class VoiceInput:
         finally:
             self._stream = None
             self._is_recording = False
+            self._recording_started_at = None
 
         with self._lock:
             if not self._audio_chunks:
@@ -91,19 +118,14 @@ class VoiceInput:
         if audio.size == 0:
             raise RuntimeError("Audio vacío: no se puede transcribir.")
 
-        api_key_path = Path(__file__).resolve().parent / "KeySecret.txt"
-        if not api_key_path.exists():
-            raise RuntimeError("No se encontró la API key en prompt_engine/KeySecret.txt.")
-
-        api_key = api_key_path.read_text(encoding="utf-8").strip()
-        if not api_key:
-            raise RuntimeError("La API key en prompt_engine/KeySecret.txt está vacía.")
-
         audio_mono = np.asarray(audio, dtype=np.float32)
         if audio_mono.ndim > 1:
             audio_mono = np.mean(audio_mono, axis=1)
         audio_mono = np.clip(audio_mono, -1.0, 1.0)
         pcm16 = (audio_mono * 32767.0).astype(np.int16)
+
+        if pcm16.nbytes > 5 * 1024 * 1024:
+            raise RuntimeError("Audio demasiado largo para transcripción segura.")
 
         temp_path: Optional[str] = None
         try:
@@ -116,10 +138,8 @@ class VoiceInput:
                 wav_file.setframerate(self.sample_rate)
                 wav_file.writeframes(pcm16.tobytes())
 
-            client = OpenAI(api_key=api_key)
-
             with open(temp_path, "rb") as audio_file:
-                transcript = client.audio.transcriptions.create(
+                transcript = self._client.audio.transcriptions.create(
                     model="gpt-4o-mini-transcribe",
                     file=audio_file
                 )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
@@ -49,12 +50,27 @@ BASE_HELP = {
     "restricciones": ("Límites de la solución.", "No usar herramientas de pago"),
 }
 
+def resource_path(relative_path: str) -> Path:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base_path / relative_path
+
+
+def _set_app_icon(window: tk.Tk | tk.Toplevel) -> None:
+    icon_path = resource_path("icono_app.ico")
+    if not icon_path.exists():
+        return
+    try:
+        window.iconbitmap(default=str(icon_path))
+    except tk.TclError:
+        pass
+
 
 class JsonRecordDialog(tk.Toplevel):
     """Modal para crear/editar registros tipo JSON (clave-valor)."""
 
     def __init__(self, master: tk.Widget, title: str, initial: dict | None = None) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title(title)
         self.transient(master)
         self.grab_set()
@@ -110,6 +126,7 @@ class JsonListManagerDialog(tk.Toplevel):
 
     def __init__(self, master: tk.Widget, title: str, records: list[dict]) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title(title)
         self.geometry("900x520")
         self.transient(master)
@@ -195,6 +212,7 @@ class JsonListManagerDialog(tk.Toplevel):
 class ProfileEditorDialog(tk.Toplevel):
     def __init__(self, master: tk.Widget, profile: dict | None = None) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title("Perfil")
         self.geometry("560x620")
         self.transient(master)
@@ -266,6 +284,7 @@ class ProfileEditorDialog(tk.Toplevel):
 class ContextEditorDialog(tk.Toplevel):
     def __init__(self, master: tk.Widget, context: dict | None = None) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title("Contexto")
         self.geometry("560x460")
         self.transient(master)
@@ -329,6 +348,7 @@ class ContextEditorDialog(tk.Toplevel):
 class TemplateEditorDialog(tk.Toplevel):
     def __init__(self, master: tk.Widget, template_name: str, content: str) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title(f"Plantilla: {template_name}")
         self.geometry("840x600")
         self.transient(master)
@@ -359,6 +379,7 @@ class HistoryWindow(tk.Toplevel):
 
     def __init__(self, master: tk.Widget, tasks: list[Tarea], callbacks: dict[str, callable]) -> None:
         super().__init__(master)
+        _set_app_icon(self)
         self.title("Historial de tareas")
         self.geometry("1020x520")
         self.transient(master)
@@ -436,9 +457,18 @@ class PromptEngineUI:
         self.root = root
         self.root.title("Prompt Engine PROM-9™")
         self.root.geometry("1280x860")
+        _set_app_icon(self.root)
 
         self.executor = ThreadPoolExecutor(max_workers=2)
-        self.voice_input = VoiceInput()
+        self.voice_input: VoiceInput | None = None
+        self.voice_error_message = ""
+        if VoiceInput.is_supported():
+            try:
+                self.voice_input = VoiceInput()
+            except RuntimeError as exc:
+                self.voice_error_message = str(exc)
+        else:
+            self.voice_error_message = "Dictado deshabilitado: falta la dependencia 'sounddevice'."
         self.voice_button = None
         self.voice_status_var = tk.StringVar(value="")
 
@@ -610,6 +640,11 @@ class PromptEngineUI:
         ttk.Label(actions_row, textvariable=self.voice_status_var).pack(side="left", padx=(8, 0))
         ttk.Button(actions_row, text="📋 Copiar Prompt", command=self._copy_prompt).pack(side="left", padx=6)
 
+        if self.voice_button and self.voice_input is None:
+            self.voice_button.configure(state="disabled")
+            if self.voice_error_message:
+                self.voice_status_var.set(self.voice_error_message)
+
     def _generate_prompt(self) -> None:
         self.generate_prompt()
 
@@ -623,6 +658,12 @@ class PromptEngineUI:
         self.show_history()
 
     def _toggle_dictation(self) -> None:
+        if self.voice_input is None:
+            messagebox.showinfo(
+                "Dictado",
+                self.voice_error_message or "El dictado no está disponible en este entorno.",
+            )
+            return
         if self.voice_input.is_recording:
             self._stop_dictation()
         else:
@@ -1042,6 +1083,7 @@ class PromptEngineUI:
             return None
         selected = tk.StringVar(value=options[0])
         modal = tk.Toplevel(self.root)
+        _set_app_icon(modal)
         modal.title(title)
         modal.transient(self.root)
         modal.grab_set()
@@ -1171,7 +1213,7 @@ class PromptEngineUI:
 
     def _on_close(self) -> None:
         try:
-            if self.voice_input.is_recording:
+            if self.voice_input and self.voice_input.is_recording:
                 self.voice_input.stop_recording()
         except Exception:
             pass
@@ -1181,6 +1223,7 @@ class PromptEngineUI:
 
 def run_ui() -> None:
     root = tk.Tk()
+    _set_app_icon(root)
     style = ttk.Style(root)
     if "vista" in style.theme_names():
         style.theme_use("vista")

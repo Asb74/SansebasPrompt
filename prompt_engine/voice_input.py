@@ -2,30 +2,40 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from pathlib import Path
 import sys
 import tempfile
 import wave
 from threading import Lock
 from time import monotonic
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
-import sounddevice as sd
 from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
+
+_SOUNDDEVICE_AVAILABLE = importlib.util.find_spec("sounddevice") is not None
+sd = importlib.import_module("sounddevice") if _SOUNDDEVICE_AVAILABLE else None
 
 
 class VoiceInput:
     """Handles microphone recording and transcription with OpenAI."""
 
     def __init__(self, sample_rate: int = 16_000, channels: int = 1) -> None:
+        if not _SOUNDDEVICE_AVAILABLE or sd is None:
+            raise RuntimeError(
+                "El dictado por voz no está disponible: falta la dependencia 'sounddevice'. "
+                "Instala el paquete para habilitar esta función."
+            )
+
         self.sample_rate = sample_rate
         self.channels = channels
         self.max_seconds = 120
         self._is_recording = False
         self._audio_chunks: list[np.ndarray] = []
         self._lock = Lock()
-        self._stream: Optional[sd.InputStream] = None
+        self._stream: Optional[Any] = None
         self._recording_started_at: Optional[float] = None
 
         if hasattr(sys, "_MEIPASS"):
@@ -42,6 +52,10 @@ class VoiceInput:
             raise RuntimeError("La API key en prompt_engine/KeySecret.txt está vacía.")
 
         self._client = OpenAI(api_key=api_key)
+
+    @classmethod
+    def is_supported(cls) -> bool:
+        return _SOUNDDEVICE_AVAILABLE
 
     @property
     def is_recording(self) -> bool:
@@ -63,7 +77,7 @@ class VoiceInput:
 
         self._recording_started_at = monotonic()
 
-        def _callback(indata: np.ndarray, frames: int, time: object, status: sd.CallbackFlags) -> None:
+        def _callback(indata: np.ndarray, frames: int, time: object, status: Any) -> None:
             _ = (frames, time)
             if status:
                 return

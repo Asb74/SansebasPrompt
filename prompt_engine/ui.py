@@ -474,6 +474,7 @@ class PromptEngineUI:
             )
         self.voice_button = None
         self.voice_status_var = tk.StringVar(value="")
+        self._dictation_target: tk.Widget | None = None
 
         self.perfiles = cargar_perfiles()
         self.contextos = cargar_contextos()
@@ -674,6 +675,7 @@ class PromptEngineUI:
 
     def _start_dictation(self) -> None:
         try:
+            self._dictation_target = self.root.focus_get()
             self.voice_input.start_recording()
             if self.voice_button:
                 self.voice_button.configure(text="⏹ Detener")
@@ -702,22 +704,42 @@ class PromptEngineUI:
 
         if not text:
             messagebox.showwarning("Dictado", "No se detectó texto.")
+            self._dictation_target = None
             return
 
-        target = self.root.focus_get()
+        target = self._dictation_target
+
+        if target is None:
+            messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
+            self._dictation_target = None
+            return
+
+        try:
+            if not bool(target.winfo_exists()):
+                messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
+                self._dictation_target = None
+                return
+        except tk.TclError:
+            messagebox.showwarning("Dictado", "El campo seleccionado ya no está disponible.")
+            self._dictation_target = None
+            return
 
         if isinstance(target, ttk.Combobox):
             messagebox.showwarning("Dictado", "No se puede dictar en campos desplegables.")
+            self._dictation_target = None
             return
 
         if isinstance(target, ttk.Entry) or isinstance(target, tk.Entry):
             target.insert(target.index("insert"), text)
+            self._dictation_target = None
             return
 
         if isinstance(target, tk.Text):
             target.insert("insert", text)
+            self._dictation_target = None
             return
 
+        self._dictation_target = None
         messagebox.showwarning("Dictado", "Selecciona un campo de texto editable.")
 
     def _copy_prompt(self) -> None:

@@ -12,8 +12,27 @@ from threading import Lock
 from time import monotonic
 from typing import Any, Optional
 
-import numpy as np
-from openai import APIConnectionError, APIError, APITimeoutError, OpenAI
+
+def resource_path(relative_path: str) -> Path:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base_path / relative_path
+
+
+_NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
+np = importlib.import_module("numpy") if _NUMPY_AVAILABLE else None
+
+_OPENAI_AVAILABLE = importlib.util.find_spec("openai") is not None
+if _OPENAI_AVAILABLE:
+    openai_module = importlib.import_module("openai")
+    OpenAI = openai_module.OpenAI
+    APITimeoutError = openai_module.APITimeoutError
+    APIConnectionError = openai_module.APIConnectionError
+    APIError = openai_module.APIError
+else:
+    OpenAI = None
+    APITimeoutError = Exception
+    APIConnectionError = Exception
+    APIError = Exception
 
 _SOUNDDEVICE_AVAILABLE = importlib.util.find_spec("sounddevice") is not None
 sd = importlib.import_module("sounddevice") if _SOUNDDEVICE_AVAILABLE else None
@@ -22,11 +41,23 @@ sd = importlib.import_module("sounddevice") if _SOUNDDEVICE_AVAILABLE else None
 class VoiceInput:
     """Handles microphone recording and transcription with OpenAI."""
 
-    def __init__(self, sample_rate: int = 16_000, channels: int = 1) -> None:
+    @classmethod
+    def _missing_dependencies(cls) -> list[str]:
+        missing: list[str] = []
         if not _SOUNDDEVICE_AVAILABLE or sd is None:
+            missing.append("sounddevice")
+        if not _NUMPY_AVAILABLE or np is None:
+            missing.append("numpy")
+        if not _OPENAI_AVAILABLE or OpenAI is None:
+            missing.append("openai")
+        return missing
+
+    def __init__(self, sample_rate: int = 16_000, channels: int = 1) -> None:
+        missing = self._missing_dependencies()
+        if missing:
             raise RuntimeError(
-                "El dictado por voz no está disponible: falta la dependencia 'sounddevice'. "
-                "Instala el paquete para habilitar esta función."
+                "El dictado por voz no está disponible: faltan dependencias opcionales "
+                f"({', '.join(missing)})."
             )
 
         self.sample_rate = sample_rate
@@ -38,12 +69,7 @@ class VoiceInput:
         self._stream: Optional[Any] = None
         self._recording_started_at: Optional[float] = None
 
-        if hasattr(sys, "_MEIPASS"):
-            base_path = Path(sys._MEIPASS)
-        else:
-            base_path = Path(__file__).resolve().parent
-
-        api_key_path = base_path / "KeySecret.txt"
+        api_key_path = resource_path("prompt_engine/KeySecret.txt")
         if not api_key_path.exists():
             raise RuntimeError("No se encontró la API key en prompt_engine/KeySecret.txt.")
 
@@ -55,7 +81,7 @@ class VoiceInput:
 
     @classmethod
     def is_supported(cls) -> bool:
-        return _SOUNDDEVICE_AVAILABLE
+        return not cls._missing_dependencies()
 
     @property
     def is_recording(self) -> bool:

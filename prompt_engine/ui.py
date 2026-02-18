@@ -468,7 +468,10 @@ class PromptEngineUI:
             except RuntimeError as exc:
                 self.voice_error_message = str(exc)
         else:
-            self.voice_error_message = "Dictado deshabilitado: falta la dependencia 'sounddevice'."
+            self.voice_error_message = (
+                "Dictado deshabilitado: faltan dependencias opcionales "
+                "(sounddevice, numpy u openai)."
+            )
         self.voice_button = None
         self.voice_status_var = tk.StringVar(value="")
 
@@ -1223,7 +1226,6 @@ class PromptEngineUI:
 
 def run_ui() -> None:
     root = tk.Tk()
-    _set_app_icon(root)
     style = ttk.Style(root)
     if "vista" in style.theme_names():
         style.theme_use("vista")

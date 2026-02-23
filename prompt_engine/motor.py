@@ -50,7 +50,15 @@ def generar_prompt(
 
     extras_perfil = perfil.get("extras")
     if isinstance(extras_perfil, dict):
-        for key, value in extras_perfil.items():
+        extras_filtrados = {
+            key: value
+            for key, value in extras_perfil.items()
+            if value is not None and str(value).strip()
+        }
+        if extras_filtrados:
+            payload["_perfil_extras"] = extras_filtrados
+
+        for key, value in extras_filtrados.items():
             payload.setdefault(key, value)
 
     area = _normalizar_area(datos_tarea.get("area", ""))

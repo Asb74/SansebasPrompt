@@ -7,22 +7,7 @@ from typing import Dict
 
 def render_base(payload: Dict[str, str]) -> str:
     """Construye la estructura base PROM-9™ con los campos generales."""
-    base_keys = {
-        "perfil_nombre",
-        "perfil_rol",
-        "contexto_nombre",
-        "contexto_rol",
-        "objetivo",
-        "entradas",
-        "restricciones",
-        "formato_salida",
-        "prioridad",
-    }
-    extras = {
-        key: value
-        for key, value in payload.items()
-        if key not in base_keys and value is not None and str(value).strip()
-    }
+    extras = payload.get("_perfil_extras") if isinstance(payload.get("_perfil_extras"), dict) else {}
     extras_block = ""
     if extras:
         extras_lines = "\n".join(f"- {key}: {value}" for key, value in extras.items())

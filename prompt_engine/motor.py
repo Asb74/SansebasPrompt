@@ -48,6 +48,11 @@ def generar_prompt(
         "prioridad": datos_tarea.get("prioridad", "Media"),
     }
 
+    extras_perfil = perfil.get("extras")
+    if isinstance(extras_perfil, dict):
+        for key, value in extras_perfil.items():
+            payload.setdefault(key, value)
+
     area = _normalizar_area(datos_tarea.get("area", ""))
     if area == "it":
         payload.update(

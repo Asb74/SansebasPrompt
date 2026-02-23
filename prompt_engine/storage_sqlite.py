@@ -72,6 +72,10 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         rol = rol_base
     if not rol_base:
         rol_base = rol
+    try:
+        extras_raw = row["extras"]
+    except (KeyError, IndexError):
+        extras_raw = None
     return {
         "nombre": _text(row["nombre"]),
         "rol": rol,
@@ -82,7 +86,7 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "estilo": _text(row["estilo"]),
         "nivel_tecnico": _text(row["nivel_tecnico"]),
         "prioridades": _loads_json(row["prioridades"], []),
-        "extras": _loads_json_object(row["extras"]),
+        "extras": _loads_json_object(extras_raw),
     }
 
 

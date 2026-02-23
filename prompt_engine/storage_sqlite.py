@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .database import get_db_path
+from .db_config import get_db_path
 from .schemas import Tarea
 
 

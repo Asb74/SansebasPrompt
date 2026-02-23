@@ -217,6 +217,12 @@ class ProfileEditorDialog(tk.Toplevel):
         self.transient(master)
         self.grab_set()
         self.result: dict | None = None
+        initial = dict(profile or {})
+        extras = initial.get("extras")
+        if isinstance(extras, dict):
+            self.extras: dict[str, str] = {str(key): str(value) for key, value in extras.items()}
+        else:
+            self.extras = {}
 
         self.fields: dict[str, tk.Widget] = {}
         form = ttk.Frame(self, padding=12)
@@ -234,7 +240,6 @@ class ProfileEditorDialog(tk.Toplevel):
             ("prioridades", "Prioridades", True),
         ]
 
-        initial = dict(profile or {})
         if "rol_base" not in initial and "rol" in initial:
             initial["rol_base"] = initial.get("rol", "")
 
@@ -253,10 +258,110 @@ class ProfileEditorDialog(tk.Toplevel):
             widget.grid(row=idx, column=1, sticky="ew", pady=4)
             self.fields[key] = widget
 
+        extras_row = len(field_defs)
+        extras_frame = ttk.LabelFrame(form, text="Campos personalizados")
+        extras_frame.grid(row=extras_row, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        extras_frame.columnconfigure(0, weight=1)
+        extras_frame.rowconfigure(0, weight=1)
+        form.rowconfigure(extras_row, weight=1)
+
+        self.extras_listbox = tk.Listbox(extras_frame, height=7)
+        self.extras_listbox.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
+
+        extras_buttons = ttk.Frame(extras_frame)
+        extras_buttons.grid(row=0, column=1, sticky="ns", padx=(4, 8), pady=8)
+        ttk.Button(extras_buttons, text="Añadir", command=self._add_extra).pack(fill="x", pady=(0, 6))
+        ttk.Button(extras_buttons, text="Editar", command=self._edit_extra).pack(fill="x", pady=6)
+        ttk.Button(extras_buttons, text="Eliminar", command=self._delete_extra).pack(fill="x", pady=(6, 0))
+        self._refresh_extras()
+
         actions = ttk.Frame(form)
-        actions.grid(row=len(field_defs), column=0, columnspan=2, sticky="e", pady=(12, 0))
+        actions.grid(row=extras_row + 1, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(actions, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
         ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
+
+    def _refresh_extras(self) -> None:
+        self.extras_listbox.delete(0, tk.END)
+        for key in sorted(self.extras):
+            self.extras_listbox.insert(tk.END, key)
+
+    def _selected_extra_key(self) -> str | None:
+        selection = self.extras_listbox.curselection()
+        if not selection:
+            return None
+        return str(self.extras_listbox.get(selection[0]))
+
+    def _extra_editor(self, title: str, key: str = "", value: str = "", key_editable: bool = True) -> tuple[str, str] | None:
+        dialog = tk.Toplevel(self)
+        _set_app_icon(dialog)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        ttk.Label(frame, text="Clave").grid(row=0, column=0, sticky="w", pady=(0, 8), padx=(0, 8))
+        key_var = tk.StringVar(value=key)
+        key_entry = ttk.Entry(frame, textvariable=key_var)
+        key_entry.grid(row=0, column=1, sticky="ew", pady=(0, 8))
+        if not key_editable:
+            key_entry.configure(state="disabled")
+
+        ttk.Label(frame, text="Valor").grid(row=1, column=0, sticky="nw", padx=(0, 8))
+        value_widget = ScrolledText(frame, height=5, wrap="word")
+        value_widget.insert("1.0", value)
+        value_widget.grid(row=1, column=1, sticky="ew")
+
+        result: tuple[str, str] | None = None
+
+        def save_and_close() -> None:
+            nonlocal result
+            final_key = key_var.get().strip()
+            if not final_key:
+                messagebox.showwarning("Validación", "La clave es obligatoria.", parent=dialog)
+                return
+            final_value = value_widget.get("1.0", "end").strip()
+            result = (final_key, final_value)
+            dialog.destroy()
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(buttons, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(buttons, text="Guardar", command=save_and_close).pack(side="right")
+
+        dialog.wait_window()
+        return result
+
+    def _add_extra(self) -> None:
+        edited = self._extra_editor("Añadir campo")
+        if not edited:
+            return
+        key, value = edited
+        self.extras[key] = value
+        self._refresh_extras()
+
+    def _edit_extra(self) -> None:
+        key = self._selected_extra_key()
+        if not key:
+            messagebox.showinfo("Campos personalizados", "Selecciona una clave para editar.", parent=self)
+            return
+        edited = self._extra_editor("Editar campo", key=key, value=self.extras.get(key, ""), key_editable=False)
+        if not edited:
+            return
+        _, value = edited
+        self.extras[key] = value
+        self._refresh_extras()
+
+    def _delete_extra(self) -> None:
+        key = self._selected_extra_key()
+        if not key:
+            messagebox.showinfo("Campos personalizados", "Selecciona una clave para eliminar.", parent=self)
+            return
+        self.extras.pop(key, None)
+        self._refresh_extras()
 
     @staticmethod
     def _read(widget: tk.Widget) -> str:
@@ -276,6 +381,7 @@ class ProfileEditorDialog(tk.Toplevel):
         payload["herramientas"] = self._split_lines(payload.get("herramientas", ""))
         payload["prioridades"] = self._split_lines(payload.get("prioridades", ""))
         payload["rol"] = payload.get("rol_base", "")
+        payload["extras"] = dict(self.extras)
         self.result = payload
         self.destroy()
 

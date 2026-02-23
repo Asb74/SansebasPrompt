@@ -587,6 +587,7 @@ class PromptEngineUI:
         self.perfil_var = tk.StringVar()
         self.contexto_var = tk.StringVar()
         self.template_var = tk.StringVar()
+        self.perfil_activo: dict | None = None
 
         self.base_widgets: dict[str, tk.Widget | DictationField] = {}
         self.profile_extra_widgets: dict[str, ttk.Entry] = {}
@@ -834,7 +835,8 @@ class PromptEngineUI:
         if not isinstance(extras, dict):
             extras = {}
 
-        for idx, (key, value) in enumerate(extras.items()):
+        for idx, key in enumerate(sorted(extras)):
+            value = extras[key]
             key_text = str(key)
             ttk.Label(self.profile_extras_frame, text=key_text).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.profile_extras_frame)
@@ -1189,10 +1191,14 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         if not modal.result:
             return
+        selected_name = modal.result.get("nombre", "")
         self.perfiles = get_perfiles()
         self.perfiles.append(modal.result)
         guardar_perfiles(self.perfiles)
         self._refresh_data_sources()
+        if selected_name:
+            self.perfil_var.set(selected_name)
+            self._on_profile_change()
 
     def edit_profile(self) -> None:
         self.perfiles = get_perfiles()
@@ -1215,8 +1221,7 @@ class PromptEngineUI:
         self._refresh_data_sources()
         selected_name = modal.result.get("nombre", selected_name)
         self.perfil_var.set(selected_name)
-        self.perfil_activo = self._selected_item(self.perfiles, selected_name)
-        self._render_profile_extras()
+        self._on_profile_change()
 
     def new_context(self) -> None:
         modal = ContextEditorDialog(self.root)

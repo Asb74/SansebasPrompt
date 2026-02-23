@@ -658,6 +658,7 @@ class PromptEngineUI:
         ttk.Label(form_inner, text="Perfil").grid(row=0, column=0, sticky="w", pady=4)
         self.perfil_combo = ttk.Combobox(form_inner, textvariable=self.perfil_var, state="readonly")
         self.perfil_combo.grid(row=0, column=1, sticky="ew", pady=4)
+        self.perfil_combo.bind("<<ComboboxSelected>>", self._on_profile_change)
 
         ttk.Label(form_inner, text="Contexto").grid(row=1, column=0, sticky="w", pady=4)
         self.contexto_combo = ttk.Combobox(form_inner, textvariable=self.contexto_var, state="readonly")
@@ -813,6 +814,9 @@ class PromptEngineUI:
         self._render_template_fields()
         self._update_context_panel("titulo")
 
+    def _on_profile_change(self, _event=None) -> None:
+        self.perfil_activo = self._selected_item(self.perfiles, self.perfil_var.get())
+
     def _render_template_fields(self) -> None:
         for widget in self.template_fields_frame.winfo_children():
             widget.destroy()
@@ -841,6 +845,7 @@ class PromptEngineUI:
 
         if profile_names and self.perfil_var.get() not in profile_names:
             self.perfil_var.set(profile_names[0])
+        self._on_profile_change()
         if context_names and self.contexto_var.get() not in context_names:
             self.contexto_var.set(context_names[0])
         if template_names:
@@ -1182,9 +1187,7 @@ class PromptEngineUI:
         self._refresh_data_sources()
         selected_name = modal.result.get("nombre", selected_name)
         self.perfil_var.set(selected_name)
-
-        if hasattr(self, "perfil_activo"):
-            self.perfil_activo = self._selected_item(self.perfiles, selected_name)
+        self._on_profile_change(None)
 
     def new_context(self) -> None:
         modal = ContextEditorDialog(self.root)

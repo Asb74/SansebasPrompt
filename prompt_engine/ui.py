@@ -1257,7 +1257,9 @@ class PromptEngineUI:
 
 
 def run_ui() -> None:
+    print(">>> ANTES DE LLAMAR A init_db()")
     init_db()
+    print(">>> DESPUÉS DE LLAMAR A init_db()")
     root = tk.Tk()
     style = ttk.Style(root)
     if "vista" in style.theme_names():

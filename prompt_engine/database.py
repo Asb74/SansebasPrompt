@@ -37,6 +37,7 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Inicializa el esquema SQLite si aún no existe."""
+    print(">>> INIT_DB EJECUTADO")
     schema = """
     CREATE TABLE IF NOT EXISTS perfiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,9 +121,13 @@ def init_db() -> None:
     """
     with get_connection() as conn:
         conn.executescript(schema)
+        print(">>> Verificando columnas de perfiles...")
         columnas_perfiles = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(perfiles)").fetchall()
         }
+        print(">>> Columnas actuales en perfiles:", columnas_perfiles)
         if "extras" not in columnas_perfiles:
+            print(">>> Añadiendo columna 'extras' a perfiles")
             conn.execute("ALTER TABLE perfiles ADD COLUMN extras TEXT;")
+            print(">>> Columna 'extras' añadida correctamente")

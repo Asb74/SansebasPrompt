@@ -13,6 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 from .widgets import DictationField
 
 from .attachments import validar_tipo_archivo
+from .database import init_db
 from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
@@ -1254,6 +1255,7 @@ class PromptEngineUI:
 
 
 def run_ui() -> None:
+    init_db()
     root = tk.Tk()
     style = ttk.Style(root)
     if "vista" in style.theme_names():

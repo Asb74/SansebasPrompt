@@ -18,20 +18,15 @@ from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
 from .storage import (
     CONTEXTOS_FILE,
-    PERFILES_FILE,
     PLANTILLAS_FILE,
     cargar_contextos,
-    cargar_perfiles,
     cargar_plantillas,
-    eliminar_tarea,
     insertar_registro_json,
     guardar_contextos,
-    guardar_perfiles,
     guardar_plantillas,
-    guardar_tarea,
-    listar_tareas,
     actualizar_registro_json,
 )
+from .storage_sqlite import eliminar_tarea, get_perfiles, guardar_tarea, insert_perfil, listar_tareas
 from .voice_input import VoiceInput
 
 BASE_FIELDS = [
@@ -475,7 +470,7 @@ class PromptEngineUI:
                 "(sounddevice, numpy u openai)."
             )
 
-        self.perfiles = cargar_perfiles()
+        self.perfiles = get_perfiles()
         self.contextos = cargar_contextos()
         self.plantillas = cargar_plantillas()
         self.history_cache: list[Tarea] = []
@@ -1012,7 +1007,7 @@ class PromptEngineUI:
             messagebox.showinfo("Historial", "Tarea eliminada correctamente.")
 
     def _refresh_data_sources(self) -> None:
-        self.perfiles = cargar_perfiles()
+        self.perfiles = get_perfiles()
         self.contextos = cargar_contextos()
         self.plantillas = cargar_plantillas()
         self._reload_selectors()
@@ -1053,11 +1048,11 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         if not modal.result:
             return
-        insertar_registro_json(PERFILES_FILE, modal.result)
+        insert_perfil(modal.result)
         self._refresh_data_sources()
 
     def edit_profile(self) -> None:
-        self.perfiles = cargar_perfiles()
+        self.perfiles = get_perfiles()
         selected_name = self._select_name("Editar Perfil", [item.get("nombre", "") for item in self.perfiles])
         if not selected_name:
             return
@@ -1070,12 +1065,9 @@ class PromptEngineUI:
         if not modal.result:
             return
         updated = modal.result
-        if original_name != updated.get("nombre"):
-            perfiles = [item for item in self.perfiles if item.get("nombre") != original_name]
-            perfiles.append(updated)
-            guardar_perfiles(perfiles)
-        else:
-            actualizar_registro_json(PERFILES_FILE, original_name, updated)
+        if original_name:
+            updated["_original_nombre"] = original_name
+        insert_perfil(updated)
         self._refresh_data_sources()
 
     def new_context(self) -> None:

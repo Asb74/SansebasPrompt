@@ -16,17 +16,19 @@ from .attachments import validar_tipo_archivo
 from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
-from .storage import (
-    CONTEXTOS_FILE,
-    PLANTILLAS_FILE,
-    cargar_contextos,
-    cargar_plantillas,
-    insertar_registro_json,
-    guardar_contextos,
-    guardar_plantillas,
-    actualizar_registro_json,
+from .storage_sqlite import (
+    eliminar_tarea,
+    get_contextos,
+    get_perfiles,
+    get_plantillas,
+    guardar_tarea,
+    insert_contexto,
+    insert_perfil,
+    listar_tareas,
+    update_contexto,
+    update_perfil,
+    upsert_plantilla,
 )
-from .storage_sqlite import eliminar_tarea, get_perfiles, guardar_tarea, insert_perfil, listar_tareas
 from .voice_input import VoiceInput
 
 BASE_FIELDS = [
@@ -471,8 +473,8 @@ class PromptEngineUI:
             )
 
         self.perfiles = get_perfiles()
-        self.contextos = cargar_contextos()
-        self.plantillas = cargar_plantillas()
+        self.contextos = get_contextos()
+        self.plantillas = get_plantillas()
         self.history_cache: list[Tarea] = []
         self.current_task: Tarea | None = None
 
@@ -1008,8 +1010,8 @@ class PromptEngineUI:
 
     def _refresh_data_sources(self) -> None:
         self.perfiles = get_perfiles()
-        self.contextos = cargar_contextos()
-        self.plantillas = cargar_plantillas()
+        self.contextos = get_contextos()
+        self.plantillas = get_plantillas()
         self._reload_selectors()
 
     def _select_name(self, title: str, options: list[str]) -> str | None:
@@ -1065,9 +1067,7 @@ class PromptEngineUI:
         if not modal.result:
             return
         updated = modal.result
-        if original_name:
-            updated["_original_nombre"] = original_name
-        insert_perfil(updated)
+        update_perfil(original_name, updated)
         self._refresh_data_sources()
 
     def new_context(self) -> None:
@@ -1075,11 +1075,11 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         if not modal.result:
             return
-        insertar_registro_json(CONTEXTOS_FILE, modal.result)
+        insert_contexto(modal.result)
         self._refresh_data_sources()
 
     def edit_context(self) -> None:
-        self.contextos = cargar_contextos()
+        self.contextos = get_contextos()
         selected_name = self._select_name("Editar Contexto", [item.get("nombre", "") for item in self.contextos])
         if not selected_name:
             return
@@ -1092,16 +1092,11 @@ class PromptEngineUI:
         if not modal.result:
             return
         updated = modal.result
-        if original_name != updated.get("nombre"):
-            contextos = [item for item in self.contextos if item.get("nombre") != original_name]
-            contextos.append(updated)
-            guardar_contextos(contextos)
-        else:
-            actualizar_registro_json(CONTEXTOS_FILE, original_name, updated)
+        update_contexto(original_name, updated)
         self._refresh_data_sources()
 
     def _template_path(self, template_name: str) -> Path:
-        return PLANTILLAS_FILE.parent / f"{template_name}.py"
+        return Path(__file__).resolve().parent / "plantillas" / f"{template_name}.py"
 
     def new_template(self) -> None:
         template_name = simpledialog.askstring("Nueva Plantilla", "Nombre de plantilla (sin .py):", parent=self.root)
@@ -1121,14 +1116,13 @@ class PromptEngineUI:
             return
         tpl_path.write_text(modal.content, encoding="utf-8")
 
-        plantillas = cargar_plantillas()
+        plantillas = get_plantillas()
         if not any(item.get("nombre") == template_name for item in plantillas):
-            plantillas.append({"nombre": template_name, "label": template_name.title(), "fields": [], "ejemplos": []})
-            guardar_plantillas(plantillas)
+            upsert_plantilla({"nombre": template_name, "label": template_name.title(), "fields": [], "ejemplos": []})
         self._refresh_data_sources()
 
     def edit_template(self) -> None:
-        self.plantillas = cargar_plantillas()
+        self.plantillas = get_plantillas()
         selected_name = self._select_name("Editar Plantilla", [item.get("nombre", "") for item in self.plantillas])
         if not selected_name:
             return

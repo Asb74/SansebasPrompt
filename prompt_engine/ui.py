@@ -22,12 +22,11 @@ from .storage_sqlite import (
     get_contextos,
     get_perfiles,
     get_plantillas,
+    guardar_perfiles,
     guardar_tarea,
     insert_contexto,
-    insert_perfil,
     listar_tareas,
     update_contexto,
-    update_perfil,
     upsert_plantilla,
 )
 from .voice_input import VoiceInput
@@ -1157,7 +1156,9 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         if not modal.result:
             return
-        insert_perfil(modal.result)
+        self.perfiles = get_perfiles()
+        self.perfiles.append(modal.result)
+        guardar_perfiles(self.perfiles)
         self._refresh_data_sources()
 
     def edit_profile(self) -> None:
@@ -1173,8 +1174,11 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         if not modal.result:
             return
-        updated = modal.result
-        update_perfil(original_name, updated)
+        for idx, current in enumerate(self.perfiles):
+            if current.get("nombre", "") == original_name:
+                self.perfiles[idx] = modal.result
+                break
+        guardar_perfiles(self.perfiles)
         self._refresh_data_sources()
 
     def new_context(self) -> None:

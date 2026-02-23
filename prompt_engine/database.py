@@ -120,3 +120,9 @@ def init_db() -> None:
     """
     with get_connection() as conn:
         conn.executescript(schema)
+        columnas_perfiles = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(perfiles)").fetchall()
+        }
+        if "extras" not in columnas_perfiles:
+            conn.execute("ALTER TABLE perfiles ADD COLUMN extras TEXT;")

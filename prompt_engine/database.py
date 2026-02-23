@@ -2,28 +2,16 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from pathlib import Path
 
-APP_DIR_NAME = "Prom9"
-DB_FILENAME = "prom9.db"
-
-
-def _local_appdata_dir() -> Path:
-    """Devuelve la carpeta local de datos de aplicación compatible con Windows."""
-    local_appdata = os.environ.get("LOCALAPPDATA")
-    if local_appdata:
-        return Path(local_appdata)
-    # Fallback útil para entornos no-Windows (tests/CI)
-    return Path.home() / "AppData" / "Local"
+BASE_DIR = Path(__file__).resolve().parent.parent
+DB_PATH = BASE_DIR / "prom9.sqlite"
 
 
 def get_db_path() -> Path:
-    """Ruta absoluta al archivo de base de datos local."""
-    base_dir = _local_appdata_dir() / APP_DIR_NAME
-    base_dir.mkdir(parents=True, exist_ok=True)
-    return base_dir / DB_FILENAME
+    """Ruta al archivo SQLite del proyecto."""
+    return DB_PATH
 
 
 def get_connection() -> sqlite3.Connection:

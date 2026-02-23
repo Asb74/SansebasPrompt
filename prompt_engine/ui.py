@@ -589,6 +589,7 @@ class PromptEngineUI:
         self.template_var = tk.StringVar()
 
         self.base_widgets: dict[str, tk.Widget | DictationField] = {}
+        self.profile_extra_widgets: dict[str, ttk.Entry] = {}
         self.template_widgets: dict[str, ttk.Entry] = {}
         self.attachment_paths: list[Path] = []
 
@@ -685,6 +686,10 @@ class PromptEngineUI:
             self.base_widgets[field] = widget
             focus_widget = widget.get_widget() if isinstance(widget, DictationField) else widget
             focus_widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
+
+        self.profile_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de perfil", padding=8)
+        self.profile_extras_frame.grid(row=98, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.profile_extras_frame.columnconfigure(1, weight=1)
 
         self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
         self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -816,6 +821,27 @@ class PromptEngineUI:
 
     def _on_profile_change(self, _event=None) -> None:
         self.perfil_activo = self._selected_item(self.perfiles, self.perfil_var.get())
+        self._render_profile_extras()
+
+    def _render_profile_extras(self) -> None:
+        for widget in self.profile_extras_frame.winfo_children():
+            widget.destroy()
+        self.profile_extra_widgets.clear()
+
+        extras = {}
+        if isinstance(self.perfil_activo, dict):
+            extras = self.perfil_activo.get("extras", {})
+        if not isinstance(extras, dict):
+            extras = {}
+
+        for idx, (key, value) in enumerate(extras.items()):
+            key_text = str(key)
+            ttk.Label(self.profile_extras_frame, text=key_text).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
+            entry = ttk.Entry(self.profile_extras_frame)
+            entry.insert(0, str(value))
+            entry.grid(row=idx, column=1, sticky="ew", pady=4)
+            entry.bind("<FocusIn>", lambda _e, f=key_text: self._update_context_panel(f))
+            self.profile_extra_widgets[key_text] = entry
 
     def _render_template_fields(self) -> None:
         for widget in self.template_fields_frame.winfo_children():
@@ -875,6 +901,8 @@ class PromptEngineUI:
         for field, _ in BASE_FIELDS:
             data[field] = self._read_widget(self.base_widgets[field])
         for field, entry in self.template_widgets.items():
+            data[field] = entry.get().strip()
+        for field, entry in self.profile_extra_widgets.items():
             data[field] = entry.get().strip()
 
         data["entradas"] = data.get("situacion", "")

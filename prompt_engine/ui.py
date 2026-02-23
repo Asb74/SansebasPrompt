@@ -1163,21 +1163,19 @@ class PromptEngineUI:
 
     def edit_profile(self) -> None:
         self.perfiles = get_perfiles()
-        selected_name = self._select_name("Editar Perfil", [item.get("nombre", "") for item in self.perfiles])
+        profile_names = [item.get("nombre", "") for item in self.perfiles]
+        selected_name = self._select_name("Editar Perfil", profile_names)
         if not selected_name:
             return
-        profile = self._selected_item(self.perfiles, selected_name)
-        if not profile:
+        try:
+            idx = profile_names.index(selected_name)
+        except ValueError:
             return
-        original_name = profile.get("nombre", "")
-        modal = ProfileEditorDialog(self.root, profile)
+        modal = ProfileEditorDialog(self.root, self.perfiles[idx])
         self.root.wait_window(modal)
         if not modal.result:
             return
-        for idx, current in enumerate(self.perfiles):
-            if current.get("nombre", "") == original_name:
-                self.perfiles[idx] = modal.result
-                break
+        self.perfiles[idx] = modal.result
         guardar_perfiles(self.perfiles)
         self._refresh_data_sources()
 

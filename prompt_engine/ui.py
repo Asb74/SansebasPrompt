@@ -1215,7 +1215,8 @@ class PromptEngineUI:
         self._refresh_data_sources()
         selected_name = modal.result.get("nombre", selected_name)
         self.perfil_var.set(selected_name)
-        self._on_profile_change(None)
+        self.perfil_activo = self._selected_item(self.perfiles, selected_name)
+        self._render_profile_extras()
 
     def new_context(self) -> None:
         modal = ContextEditorDialog(self.root)

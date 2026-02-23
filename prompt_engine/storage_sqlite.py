@@ -52,6 +52,13 @@ def _dumps_json(value: Any, default: Any) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _loads_json_object(value: Any) -> Dict[str, Any]:
+    payload = _loads_json(value, {})
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
 def _text(value: Any, default: str = "") -> str:
     if value is None:
         return default
@@ -75,6 +82,7 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "estilo": _text(row["estilo"]),
         "nivel_tecnico": _text(row["nivel_tecnico"]),
         "prioridades": _loads_json(row["prioridades"], []),
+        "extras": _loads_json_object(row["extras"]),
     }
 
 
@@ -111,8 +119,8 @@ def guardar_perfiles(perfiles: List[Dict[str, Any]]) -> None:
                 """
                 INSERT INTO perfiles (
                     nombre, rol, rol_base, empresa, ubicacion,
-                    herramientas, estilo, nivel_tecnico, prioridades
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    herramientas, estilo, nivel_tecnico, prioridades, extras
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _text(perfil.get("nombre")),
@@ -124,6 +132,7 @@ def guardar_perfiles(perfiles: List[Dict[str, Any]]) -> None:
                     _text(perfil.get("estilo")),
                     _text(perfil.get("nivel_tecnico")),
                     _dumps_json(perfil.get("prioridades"), []),
+                    _dumps_json(perfil.get("extras"), {}),
                 ),
             )
 
@@ -186,7 +195,7 @@ def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -
                 """
                 UPDATE perfiles
                 SET nombre = ?, rol = ?, rol_base = ?, empresa = ?, ubicacion = ?,
-                    herramientas = ?, estilo = ?, nivel_tecnico = ?, prioridades = ?
+                    herramientas = ?, estilo = ?, nivel_tecnico = ?, prioridades = ?, extras = ?
                 WHERE nombre = ?
                 """,
                 (
@@ -199,6 +208,7 @@ def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -
                     _text(payload.get("estilo")),
                     _text(payload.get("nivel_tecnico")),
                     _dumps_json(payload.get("prioridades"), []),
+                    _dumps_json(payload.get("extras"), {}),
                     _text(nombre),
                 ),
             )
@@ -272,8 +282,8 @@ def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
             """
             INSERT INTO perfiles (
                 nombre, rol, rol_base, empresa, ubicacion,
-                herramientas, estilo, nivel_tecnico, prioridades
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                herramientas, estilo, nivel_tecnico, prioridades, extras
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _text(payload.get("nombre")),
@@ -285,6 +295,7 @@ def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
                 _text(payload.get("estilo")),
                 _text(payload.get("nivel_tecnico")),
                 _dumps_json(payload.get("prioridades"), []),
+                _dumps_json(payload.get("extras"), {}),
             ),
         )
 

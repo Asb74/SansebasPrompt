@@ -3,15 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "prom9.sqlite"
-
-
-def get_db_path() -> Path:
-    """Ruta al archivo SQLite del proyecto."""
-    return DB_PATH
+from .db_config import get_db_path
 
 
 def get_connection() -> sqlite3.Connection:

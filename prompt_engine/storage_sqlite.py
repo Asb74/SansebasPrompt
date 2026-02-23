@@ -1,121 +1,147 @@
-"""Capa de persistencia SQLite para perfiles y tareas."""
+"""Capa de persistencia SQLite para PROM-9™ (reemplazo de JSON)."""
 
 from __future__ import annotations
 
+import json
+import sqlite3
+from pathlib import Path
 from typing import Any, Dict, List
 
-from .database import get_connection
 from .schemas import Tarea
 
-
-def _normalize_lines(value: Any) -> list[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    if isinstance(value, str):
-        return [line.strip() for line in value.splitlines() if line.strip()]
-    return []
+BASE_DIR = Path(__file__).resolve().parent
+DB_FILENAME = "prom9.sqlite"
 
 
-def _row_to_dict(row: Any) -> Dict[str, Any]:
-    return dict(row) if row is not None else {}
+def _candidate_db_paths() -> list[Path]:
+    return [
+        BASE_DIR / DB_FILENAME,
+        Path.cwd() / DB_FILENAME,
+        BASE_DIR.parent / DB_FILENAME,
+    ]
+
+
+def _get_db_path() -> Path:
+    for candidate in _candidate_db_paths():
+        if candidate.exists():
+            return candidate
+    # Fallback: ruta por defecto en el paquete.
+    return BASE_DIR / DB_FILENAME
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(_get_db_path())
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _loads_json(value: Any, default: Any) -> Any:
+    if value is None:
+        return default
+    if isinstance(value, (list, dict)):
+        return value
+    text = str(value).strip()
+    if not text:
+        return default
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return default
+
+
+def _dumps_json(value: Any, fallback: Any) -> str:
+    payload = fallback if value is None else value
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
 
 
 def get_perfiles() -> List[Dict[str, Any]]:
-    with get_connection() as conn:
-        perfiles_rows = conn.execute(
+    with _connect() as conn:
+        rows = conn.execute(
             """
-            SELECT id, nombre, rol_base, empresa, ubicacion, estilo, nivel_tecnico
+            SELECT id, nombre, rol, rol_base, empresa, ubicacion,
+                   herramientas, estilo, nivel_tecnico, prioridades
             FROM perfiles
             ORDER BY nombre COLLATE NOCASE
             """
         ).fetchall()
 
-        perfiles: list[dict[str, Any]] = []
-        for perfil_row in perfiles_rows:
-            perfil = _row_to_dict(perfil_row)
-            perfil_id = int(perfil["id"])
-
-            herramientas_rows = conn.execute(
-                """
-                SELECT herramienta
-                FROM perfil_herramientas
-                WHERE perfil_id = ?
-                ORDER BY orden, id
-                """,
-                (perfil_id,),
-            ).fetchall()
-            prioridades_rows = conn.execute(
-                """
-                SELECT prioridad
-                FROM perfil_prioridades
-                WHERE perfil_id = ?
-                ORDER BY orden, id
-                """,
-                (perfil_id,),
-            ).fetchall()
-
-            perfil["herramientas"] = [row["herramienta"] for row in herramientas_rows]
-            perfil["prioridades"] = [row["prioridad"] for row in prioridades_rows]
-            perfiles.append(perfil)
-
-        return perfiles
+    perfiles: list[dict[str, Any]] = []
+    for row in rows:
+        perfil = {
+            "id": row["id"],
+            "nombre": _text(row["nombre"]),
+            "rol": _text(row["rol"]),
+            "rol_base": _text(row["rol_base"]),
+            "empresa": _text(row["empresa"]),
+            "ubicacion": _text(row["ubicacion"]),
+            "herramientas": _loads_json(row["herramientas"], []),
+            "estilo": _text(row["estilo"]),
+            "nivel_tecnico": _text(row["nivel_tecnico"]),
+            "prioridades": _loads_json(row["prioridades"], []),
+        }
+        if not perfil["rol"]:
+            perfil["rol"] = perfil["rol_base"]
+        if not perfil["rol_base"]:
+            perfil["rol_base"] = perfil["rol"]
+        perfiles.append(perfil)
+    return perfiles
 
 
-def insert_perfil(data: Dict[str, Any]) -> None:
-    nombre = str(data.get("nombre", "")).strip()
-    if not nombre:
-        raise ValueError("El perfil requiere un nombre.")
-
-    original_nombre = str(data.get("_original_nombre", "")).strip()
-    herramientas = _normalize_lines(data.get("herramientas", []))
-    prioridades = _normalize_lines(data.get("prioridades", []))
-
-    with get_connection() as conn:
-        if original_nombre and original_nombre != nombre:
-            conn.execute("DELETE FROM perfiles WHERE nombre = ?", (original_nombre,))
-
-        conn.execute(
+def get_contextos() -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
             """
-            INSERT INTO perfiles (nombre, rol_base, empresa, ubicacion, estilo, nivel_tecnico)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(nombre) DO UPDATE SET
-                rol_base = excluded.rol_base,
-                empresa = excluded.empresa,
-                ubicacion = excluded.ubicacion,
-                estilo = excluded.estilo,
-                nivel_tecnico = excluded.nivel_tecnico
-            """,
-            (
-                nombre,
-                str(data.get("rol_base", "")).strip(),
-                str(data.get("empresa", "")).strip(),
-                str(data.get("ubicacion", "")).strip(),
-                str(data.get("estilo", "")).strip(),
-                str(data.get("nivel_tecnico", "")).strip(),
-            ),
+            SELECT id, nombre, rol_contextual, enfoque
+            FROM contextos
+            ORDER BY nombre COLLATE NOCASE
+            """
+        ).fetchall()
+
+    contextos: list[dict[str, Any]] = []
+    for row in rows:
+        contexto = {
+            "id": row["id"],
+            "nombre": _text(row["nombre"]),
+            "rol_contextual": _text(row["rol_contextual"]),
+            "enfoque": _loads_json(row["enfoque"], []),
+        }
+        contextos.append(contexto)
+    return contextos
+
+
+def get_plantillas() -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, nombre, label, fields, ejemplos
+            FROM plantillas
+            ORDER BY nombre COLLATE NOCASE
+            """
+        ).fetchall()
+
+    plantillas: list[dict[str, Any]] = []
+    for row in rows:
+        plantillas.append(
+            {
+                "id": row["id"],
+                "nombre": _text(row["nombre"]),
+                "label": _text(row["label"]),
+                "fields": _loads_json(row["fields"], []),
+                "ejemplos": _loads_json(row["ejemplos"], []),
+            }
         )
-
-        perfil_row = conn.execute("SELECT id FROM perfiles WHERE nombre = ?", (nombre,)).fetchone()
-        if perfil_row is None:
-            return
-        perfil_id = int(perfil_row["id"])
-
-        conn.execute("DELETE FROM perfil_herramientas WHERE perfil_id = ?", (perfil_id,))
-        conn.execute("DELETE FROM perfil_prioridades WHERE perfil_id = ?", (perfil_id,))
-
-        conn.executemany(
-            "INSERT INTO perfil_herramientas (perfil_id, herramienta, orden) VALUES (?, ?, ?)",
-            [(perfil_id, herramienta, idx) for idx, herramienta in enumerate(herramientas)],
-        )
-        conn.executemany(
-            "INSERT INTO perfil_prioridades (perfil_id, prioridad, orden) VALUES (?, ?, ?)",
-            [(perfil_id, prioridad, idx) for idx, prioridad in enumerate(prioridades)],
-        )
+    return plantillas
 
 
-def guardar_tarea(task: Tarea) -> None:
-    data = task.to_dict()
-    with get_connection() as conn:
+def guardar_tarea(tarea: Tarea) -> None:
+    data = tarea.to_dict()
+    with _connect() as conn:
         conn.execute(
             """
             INSERT INTO tareas (
@@ -136,28 +162,178 @@ def guardar_tarea(task: Tarea) -> None:
                 created_at = excluded.created_at
             """,
             (
-                data["id"],
-                data["usuario"],
-                data["contexto"],
-                data["area"],
-                data["objetivo"],
-                data["entradas"],
-                data["restricciones"],
-                data["formato_salida"],
-                data["prioridad"],
-                data["prompt_generado"],
-                data["created_at"],
+                _text(data.get("id")),
+                _text(data.get("usuario")),
+                _text(data.get("contexto")),
+                _text(data.get("area")),
+                _text(data.get("objetivo")),
+                _text(data.get("entradas")),
+                _text(data.get("restricciones")),
+                _text(data.get("formato_salida")),
+                _text(data.get("prioridad"), "Media"),
+                _text(data.get("prompt_generado")),
+                _text(data.get("created_at")),
             ),
         )
 
 
 def listar_tareas() -> List[Tarea]:
-    with get_connection() as conn:
+    with _connect() as conn:
         rows = conn.execute("SELECT * FROM tareas ORDER BY id DESC").fetchall()
-    return [Tarea.from_dict(_row_to_dict(row)) for row in rows]
+
+    tareas: list[Tarea] = []
+    for row in rows:
+        tareas.append(
+            Tarea.from_dict(
+                {
+                    "id": _text(row["id"]),
+                    "usuario": _text(row["usuario"]),
+                    "contexto": _text(row["contexto"]),
+                    "area": _text(row["area"]),
+                    "objetivo": _text(row["objetivo"]),
+                    "entradas": _text(row["entradas"]),
+                    "restricciones": _text(row["restricciones"]),
+                    "formato_salida": _text(row["formato_salida"]),
+                    "prioridad": _text(row["prioridad"], "Media"),
+                    "prompt_generado": _text(row["prompt_generado"]),
+                    "created_at": _text(row["created_at"]),
+                }
+            )
+        )
+    return tareas
 
 
-def eliminar_tarea(task_id: str) -> bool:
-    with get_connection() as conn:
-        cursor = conn.execute("DELETE FROM tareas WHERE id = ?", (task_id,))
+def eliminar_tarea(tarea_id: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM tareas WHERE id = ?", (_text(tarea_id),))
         return cursor.rowcount > 0
+
+
+def insert_perfil(payload: Dict[str, Any]) -> None:
+    nombre = _text(payload.get("nombre")).strip()
+    if not nombre:
+        raise ValueError("El perfil requiere nombre.")
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO perfiles (
+                nombre, rol, rol_base, empresa, ubicacion,
+                herramientas, estilo, nivel_tecnico, prioridades
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                nombre,
+                _text(payload.get("rol")) or _text(payload.get("rol_base")),
+                _text(payload.get("rol_base")) or _text(payload.get("rol")),
+                _text(payload.get("empresa")),
+                _text(payload.get("ubicacion")),
+                _dumps_json(payload.get("herramientas"), []),
+                _text(payload.get("estilo")),
+                _text(payload.get("nivel_tecnico")),
+                _dumps_json(payload.get("prioridades"), []),
+            ),
+        )
+
+
+def update_perfil(nombre_original: str, payload: Dict[str, Any]) -> bool:
+    nombre_objetivo = _text(payload.get("nombre")).strip()
+    if not nombre_objetivo:
+        return False
+
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE perfiles
+            SET nombre = ?,
+                rol = ?,
+                rol_base = ?,
+                empresa = ?,
+                ubicacion = ?,
+                herramientas = ?,
+                estilo = ?,
+                nivel_tecnico = ?,
+                prioridades = ?
+            WHERE nombre = ?
+            """,
+            (
+                nombre_objetivo,
+                _text(payload.get("rol")) or _text(payload.get("rol_base")),
+                _text(payload.get("rol_base")) or _text(payload.get("rol")),
+                _text(payload.get("empresa")),
+                _text(payload.get("ubicacion")),
+                _dumps_json(payload.get("herramientas"), []),
+                _text(payload.get("estilo")),
+                _text(payload.get("nivel_tecnico")),
+                _dumps_json(payload.get("prioridades"), []),
+                _text(nombre_original),
+            ),
+        )
+        return cursor.rowcount > 0
+
+
+def insert_contexto(payload: Dict[str, Any]) -> None:
+    nombre = _text(payload.get("nombre")).strip()
+    if not nombre:
+        raise ValueError("El contexto requiere nombre.")
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO contextos (nombre, rol_contextual, enfoque)
+            VALUES (?, ?, ?)
+            """,
+            (
+                nombre,
+                _text(payload.get("rol_contextual")),
+                _dumps_json(payload.get("enfoque"), []),
+            ),
+        )
+
+
+def update_contexto(nombre_original: str, payload: Dict[str, Any]) -> bool:
+    nombre_objetivo = _text(payload.get("nombre")).strip()
+    if not nombre_objetivo:
+        return False
+
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE contextos
+            SET nombre = ?,
+                rol_contextual = ?,
+                enfoque = ?
+            WHERE nombre = ?
+            """,
+            (
+                nombre_objetivo,
+                _text(payload.get("rol_contextual")),
+                _dumps_json(payload.get("enfoque"), []),
+                _text(nombre_original),
+            ),
+        )
+        return cursor.rowcount > 0
+
+
+def upsert_plantilla(payload: Dict[str, Any]) -> None:
+    nombre = _text(payload.get("nombre")).strip()
+    if not nombre:
+        raise ValueError("La plantilla requiere nombre.")
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO plantillas (nombre, label, fields, ejemplos)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(nombre) DO UPDATE SET
+                label = excluded.label,
+                fields = excluded.fields,
+                ejemplos = excluded.ejemplos
+            """,
+            (
+                nombre,
+                _text(payload.get("label")) or nombre.title(),
+                _dumps_json(payload.get("fields"), []),
+                _dumps_json(payload.get("ejemplos"), []),
+            ),
+        )

@@ -7,31 +7,14 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .database import get_db_path
 from .schemas import Tarea
-
-BASE_DIR = Path(__file__).resolve().parent
-DB_FILENAME = "prom9.sqlite"
-
-
-def _db_candidates() -> list[Path]:
-    return [
-        BASE_DIR / DB_FILENAME,
-        BASE_DIR.parent / DB_FILENAME,
-        Path.cwd() / DB_FILENAME,
-    ]
-
-
-def _db_path() -> Path:
-    for candidate in _db_candidates():
-        if candidate.exists():
-            return candidate
-    # Compatibilidad: si no existe aún, SQLite lo creará en esta ruta por defecto.
-    return BASE_DIR / DB_FILENAME
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
-    print(">>> DB PATH EN USO:", _db_path())
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    print(">>> DB PATH EN USO:", db_path)
     conn.row_factory = sqlite3.Row
     return conn
 

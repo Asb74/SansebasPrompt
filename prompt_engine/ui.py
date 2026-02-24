@@ -1531,12 +1531,26 @@ class PromptEngineUI:
         self.attachment_paths = []
         self._refresh_attachment_list()
 
-        if clone.usuario:
+        self._refresh_data_sources()
+
+        perfil_values = list(self.perfil_combo["values"])
+        contexto_values = list(self.contexto_combo["values"])
+        template_values = list(self.template_combo["values"])
+
+        if clone.usuario in perfil_values:
             self.perfil_var.set(clone.usuario)
-        if clone.contexto:
+        elif perfil_values:
+            self.perfil_var.set(perfil_values[0])
+
+        if clone.contexto in contexto_values:
             self.contexto_var.set(clone.contexto)
-        if clone.area:
+        elif contexto_values:
+            self.contexto_var.set(contexto_values[0])
+
+        if clone.area in template_values:
             self.template_var.set(clone.area)
+        elif template_values:
+            self.template_var.set(template_values[0])
 
         payload: dict[str, object] | None = None
         if clone.payload_json:

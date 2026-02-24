@@ -350,6 +350,7 @@ def listar_tareas() -> List[Tarea]:
                 "restricciones": _text(row["restricciones"]),
                 "formato_salida": _text(row["formato_salida"]),
                 "prioridad": _text(row["prioridad"], "Media"),
+                "payload_json": _text(row["payload_json"]),
                 "prompt_generado": _text(row["prompt_generado"]),
                 "created_at": _text(row["created_at"]),
             }
@@ -366,8 +367,8 @@ def guardar_tarea(tarea: Tarea) -> None:
             INSERT INTO tareas (
                 id, usuario, contexto, area, objetivo,
                 entradas, restricciones, formato_salida,
-                prioridad, prompt_generado, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                prioridad, payload_json, prompt_generado, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 usuario = excluded.usuario,
                 contexto = excluded.contexto,
@@ -377,6 +378,7 @@ def guardar_tarea(tarea: Tarea) -> None:
                 restricciones = excluded.restricciones,
                 formato_salida = excluded.formato_salida,
                 prioridad = excluded.prioridad,
+                payload_json = excluded.payload_json,
                 prompt_generado = excluded.prompt_generado,
                 created_at = excluded.created_at
             """,
@@ -390,6 +392,7 @@ def guardar_tarea(tarea: Tarea) -> None:
                 _text(data.get("restricciones")),
                 _text(data.get("formato_salida")),
                 _text(data.get("prioridad"), "Media"),
+                _text(data.get("payload_json")),
                 _text(data.get("prompt_generado")),
                 _text(data.get("created_at")),
             ),
@@ -406,8 +409,8 @@ def sobrescribir_tareas(tareas: List[Tarea]) -> None:
                 INSERT INTO tareas (
                     id, usuario, contexto, area, objetivo,
                     entradas, restricciones, formato_salida,
-                    prioridad, prompt_generado, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    prioridad, payload_json, prompt_generado, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _text(data.get("id")),
@@ -419,6 +422,7 @@ def sobrescribir_tareas(tareas: List[Tarea]) -> None:
                     _text(data.get("restricciones")),
                     _text(data.get("formato_salida")),
                     _text(data.get("prioridad"), "Media"),
+                    _text(data.get("payload_json")),
                     _text(data.get("prompt_generado")),
                     _text(data.get("created_at")),
                 ),
@@ -449,6 +453,7 @@ def buscar_tarea_por_id(tarea_id: str) -> Optional[Tarea]:
             "restricciones": _text(row["restricciones"]),
             "formato_salida": _text(row["formato_salida"]),
             "prioridad": _text(row["prioridad"], "Media"),
+            "payload_json": _text(row["payload_json"]),
             "prompt_generado": _text(row["prompt_generado"]),
             "created_at": _text(row["created_at"]),
         }

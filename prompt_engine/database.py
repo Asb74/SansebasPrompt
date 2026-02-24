@@ -95,6 +95,7 @@ def init_db() -> None:
         restricciones TEXT NOT NULL,
         formato_salida TEXT NOT NULL,
         prioridad TEXT NOT NULL,
+        payload_json TEXT,
         prompt_generado TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
     );
@@ -141,3 +142,9 @@ def init_db() -> None:
                   AND foco IS NOT NULL
                 """
             )
+
+        columnas_tareas = {
+            row["name"] for row in conn.execute("PRAGMA table_info(tareas)").fetchall()
+        }
+        if "payload_json" not in columnas_tareas:
+            conn.execute("ALTER TABLE tareas ADD COLUMN payload_json TEXT;")

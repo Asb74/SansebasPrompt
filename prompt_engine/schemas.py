@@ -48,6 +48,7 @@ class Tarea:
     restricciones: str
     formato_salida: str
     prioridad: str
+    payload_json: str = ""
     prompt_generado: str = ""
     created_at: str = field(default_factory=iso_timestamp)
 
@@ -63,6 +64,7 @@ class Tarea:
             "restricciones": self.restricciones,
             "formato_salida": self.formato_salida,
             "prioridad": self.prioridad,
+            "payload_json": self.payload_json,
             "prompt_generado": self.prompt_generado,
             "created_at": self.created_at,
         }
@@ -80,6 +82,7 @@ class Tarea:
             restricciones=data.get("restricciones", ""),
             formato_salida=data.get("formato_salida", ""),
             prioridad=data.get("prioridad", "Media"),
+            payload_json=data.get("payload_json", ""),
             prompt_generado=data.get("prompt_generado", ""),
             created_at=data.get("created_at", iso_timestamp()),
         )

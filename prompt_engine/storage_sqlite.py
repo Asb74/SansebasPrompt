@@ -477,6 +477,16 @@ def update_contexto(nombre_original: str, payload: Dict[str, Any]) -> bool:
     return actualizar_registro_json(Path("contextos.json"), nombre_original, payload)
 
 
+def update_plantilla(nombre_original: str, payload: Dict[str, Any]) -> bool:
+    payload_to_save = {
+        "nombre": _text(payload.get("nombre")) or _text(nombre_original),
+        "label": _text(payload.get("label")),
+        "fields": payload.get("fields", []),
+        "ejemplos": payload.get("ejemplos", []),
+    }
+    return actualizar_registro_json(Path("plantillas.json"), nombre_original, payload_to_save)
+
+
 def upsert_plantilla(payload: Dict[str, Any]) -> None:
     nombre = _text(payload.get("nombre"))
     if not actualizar_registro_json(Path("plantillas.json"), nombre, payload):

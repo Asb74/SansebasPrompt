@@ -112,3 +112,7 @@ def init_db() -> None:
             print(">>> Añadiendo columna 'extras' a perfiles")
             conn.execute("ALTER TABLE perfiles ADD COLUMN extras TEXT;")
             print(">>> Columna 'extras' añadida correctamente")
+        if "extras_fields" not in columnas_perfiles:
+            print(">>> Añadiendo columna 'extras_fields' a perfiles")
+            conn.execute("ALTER TABLE perfiles ADD COLUMN extras_fields TEXT;")
+            print(">>> Columna 'extras_fields' añadida correctamente")

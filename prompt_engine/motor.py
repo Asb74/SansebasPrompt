@@ -48,18 +48,24 @@ def generar_prompt(
         "prioridad": datos_tarea.get("prioridad", "Media"),
     }
 
-    extras_perfil = perfil.get("extras")
-    if isinstance(extras_perfil, dict):
-        extras_filtrados = {
-            key: value
-            for key, value in extras_perfil.items()
-            if value is not None and str(value).strip()
-        }
-        if extras_filtrados:
-            payload["_perfil_extras"] = extras_filtrados
+    extras_filtrados: dict[str, str] = {}
+    extras_fields = perfil.get("extras_fields")
+    if isinstance(extras_fields, list):
+        for field in extras_fields:
+            if not isinstance(field, dict):
+                continue
+            key = str(field.get("key", "")).strip()
+            if not key:
+                continue
+            value = datos_tarea.get(key)
+            if value is None:
+                continue
+            value_text = str(value).strip()
+            if value_text:
+                extras_filtrados[key] = value_text
 
-        for key, value in extras_filtrados.items():
-            payload.setdefault(key, value)
+    if extras_filtrados:
+        payload["_perfil_extras"] = extras_filtrados
 
     area = _normalizar_area(datos_tarea.get("area", ""))
     if area == "it":

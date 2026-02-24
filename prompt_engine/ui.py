@@ -26,6 +26,7 @@ from .storage_sqlite import (
     guardar_tarea,
     insert_contexto,
     listar_tareas,
+    update_plantilla,
     update_contexto,
     upsert_plantilla,
 )
@@ -598,21 +599,76 @@ class ContextEditorDialog(tk.Toplevel):
 
 
 class TemplateEditorDialog(tk.Toplevel):
-    def __init__(self, master: tk.Widget, template_name: str, content: str) -> None:
+    def __init__(self, master: tk.Widget, template_data: dict[str, object], content: str) -> None:
         super().__init__(master)
         _set_app_icon(self)
-        self.title(f"Plantilla: {template_name}")
-        self.geometry("840x600")
+        self.template_name = str(template_data.get("nombre", ""))
+        self.title(f"Plantilla: {self.template_name}")
+        self.geometry("920x680")
         self.transient(master)
         self.grab_set()
-        self.content: str | None = None
+        self.result: dict[str, object] | None = None
+        self.template_fields: list[dict[str, str]] = [
+            {
+                "key": str(item.get("key", "")).strip(),
+                "label": str(item.get("label", "")).strip(),
+                "help": str(item.get("help", "")).strip(),
+                "example": str(item.get("example", "")).strip(),
+                "default": str(item.get("default", "")).strip(),
+            }
+            for item in (template_data.get("fields") if isinstance(template_data.get("fields"), list) else [])
+            if isinstance(item, dict)
+        ]
 
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        self.editor = ScrolledText(frame, wrap="word")
+        notebook = ttk.Notebook(frame)
+        notebook.grid(row=0, column=0, sticky="nsew")
+
+        definition_tab = ttk.Frame(notebook, padding=12)
+        definition_tab.columnconfigure(0, weight=1)
+        definition_tab.rowconfigure(1, weight=1)
+        definition_tab.rowconfigure(2, weight=1)
+        notebook.add(definition_tab, text="Definición (sin código)")
+
+        label_frame = ttk.Frame(definition_tab)
+        label_frame.grid(row=0, column=0, sticky="ew")
+        label_frame.columnconfigure(1, weight=1)
+        ttk.Label(label_frame, text="Label de plantilla").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.template_label_var = tk.StringVar(value=str(template_data.get("label", "")))
+        ttk.Entry(label_frame, textvariable=self.template_label_var).grid(row=0, column=1, sticky="ew")
+
+        fields_frame = ttk.LabelFrame(definition_tab, text="Campos de plantilla")
+        fields_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
+        fields_frame.columnconfigure(0, weight=1)
+        fields_frame.rowconfigure(0, weight=1)
+        self.fields_listbox = tk.Listbox(fields_frame, exportselection=False, height=8)
+        self.fields_listbox.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
+        fields_buttons = ttk.Frame(fields_frame)
+        fields_buttons.grid(row=0, column=1, sticky="ns", padx=(4, 8), pady=8)
+        ttk.Button(fields_buttons, text="Añadir", command=self._add_field).pack(fill="x", pady=(0, 6))
+        ttk.Button(fields_buttons, text="Editar", command=self._edit_field).pack(fill="x", pady=6)
+        ttk.Button(fields_buttons, text="Eliminar", command=self._delete_field).pack(fill="x", pady=(6, 0))
+        self._refresh_template_fields()
+
+        examples_frame = ttk.LabelFrame(definition_tab, text="Ejemplos de uso (uno por línea)")
+        examples_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        examples_frame.columnconfigure(0, weight=1)
+        examples_frame.rowconfigure(0, weight=1)
+        self.examples_text = ScrolledText(examples_frame, wrap="word", height=7)
+        self.examples_text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        examples = template_data.get("ejemplos") if isinstance(template_data.get("ejemplos"), list) else []
+        self.examples_text.insert("1.0", "\n".join(str(item) for item in examples if str(item).strip()))
+
+        advanced_tab = ttk.Frame(notebook, padding=12)
+        advanced_tab.columnconfigure(0, weight=1)
+        advanced_tab.rowconfigure(0, weight=1)
+        notebook.add(advanced_tab, text="Código (Avanzado)")
+
+        self.editor = ScrolledText(advanced_tab, wrap="word")
         self.editor.grid(row=0, column=0, sticky="nsew")
         self.editor.insert("1.0", content)
 
@@ -622,8 +678,118 @@ class TemplateEditorDialog(tk.Toplevel):
         ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
 
     def _save(self) -> None:
-        self.content = self.editor.get("1.0", "end")
+        label = self.template_label_var.get().strip()
+        if not label:
+            messagebox.showwarning("Validación", "El label de plantilla es obligatorio.", parent=self)
+            return
+        self.result = {
+            "label": label,
+            "fields": list(self.template_fields),
+            "ejemplos": self._split_lines(self.examples_text.get("1.0", "end")),
+            "content": self.editor.get("1.0", "end"),
+        }
         self.destroy()
+
+    def _refresh_template_fields(self) -> None:
+        self.fields_listbox.delete(0, tk.END)
+        for item in self.template_fields:
+            label = item.get("label") or item.get("key", "")
+            self.fields_listbox.insert(tk.END, f"{label} ({item.get('key', '')})")
+
+    def _selected_field_index(self) -> int | None:
+        selection = self.fields_listbox.curselection()
+        if not selection:
+            return None
+        return int(selection[0])
+
+    def _field_editor(self, title: str, initial: dict[str, str] | None = None) -> dict[str, str] | None:
+        initial = initial or {}
+        dialog = tk.Toplevel(self)
+        _set_app_icon(dialog)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        vars_map = {
+            "key": tk.StringVar(value=initial.get("key", "")),
+            "label": tk.StringVar(value=initial.get("label", "")),
+            "help": tk.StringVar(value=initial.get("help", "")),
+            "example": tk.StringVar(value=initial.get("example", "")),
+            "default": tk.StringVar(value=initial.get("default", "")),
+        }
+        labels = {
+            "key": "key (obligatorio)",
+            "label": "label",
+            "help": "help",
+            "example": "example",
+            "default": "default (opcional)",
+        }
+
+        for row, key in enumerate(["key", "label", "help", "example", "default"]):
+            ttk.Label(frame, text=labels[key]).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
+            ttk.Entry(frame, textvariable=vars_map[key]).grid(row=row, column=1, sticky="ew", pady=4)
+
+        result: dict[str, str] | None = None
+
+        def save_and_close() -> None:
+            nonlocal result
+            final_key = vars_map["key"].get().strip()
+            if not final_key:
+                messagebox.showwarning("Validación", "La key del campo es obligatoria.", parent=dialog)
+                return
+            result = {name: var.get().strip() for name, var in vars_map.items()}
+            dialog.destroy()
+
+        buttons = ttk.Frame(frame)
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(buttons, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(buttons, text="Guardar", command=save_and_close).pack(side="right")
+
+        dialog.wait_window()
+        return result
+
+    def _add_field(self) -> None:
+        edited = self._field_editor("Añadir campo")
+        if not edited:
+            return
+        key = edited.get("key", "")
+        if any(item.get("key") == key for item in self.template_fields):
+            messagebox.showwarning("Campos de plantilla", "La key ya existe.", parent=self)
+            return
+        self.template_fields.append(edited)
+        self._refresh_template_fields()
+
+    def _edit_field(self) -> None:
+        idx = self._selected_field_index()
+        if idx is None:
+            messagebox.showinfo("Campos de plantilla", "Selecciona un campo para editar.", parent=self)
+            return
+        edited = self._field_editor("Editar campo", initial=self.template_fields[idx])
+        if not edited:
+            return
+        new_key = edited.get("key", "")
+        if any(i != idx and item.get("key") == new_key for i, item in enumerate(self.template_fields)):
+            messagebox.showwarning("Campos de plantilla", "La key ya existe.", parent=self)
+            return
+        self.template_fields[idx] = edited
+        self._refresh_template_fields()
+
+    def _delete_field(self) -> None:
+        idx = self._selected_field_index()
+        if idx is None:
+            messagebox.showinfo("Campos de plantilla", "Selecciona un campo para eliminar.", parent=self)
+            return
+        self.template_fields.pop(idx)
+        self._refresh_template_fields()
+
+    @staticmethod
+    def _split_lines(raw: str) -> list[str]:
+        return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
 class HistoryWindow(tk.Toplevel):
@@ -1499,15 +1665,23 @@ class PromptEngineUI:
             "def render_custom(payload: dict[str, str]) -> str:\n"
             "    return \"\"\n"
         )
-        modal = TemplateEditorDialog(self.root, template_name, initial)
+        modal = TemplateEditorDialog(
+            self.root,
+            {"nombre": template_name, "label": template_name.title(), "fields": [], "ejemplos": []},
+            initial,
+        )
         self.root.wait_window(modal)
-        if modal.content is None:
+        if not modal.result:
             return
-        tpl_path.write_text(modal.content, encoding="utf-8")
-
-        plantillas = get_plantillas()
-        if not any(item.get("nombre") == template_name for item in plantillas):
-            upsert_plantilla({"nombre": template_name, "label": template_name.title(), "fields": [], "ejemplos": []})
+        tpl_path.write_text(str(modal.result.get("content", "")), encoding="utf-8")
+        upsert_plantilla(
+            {
+                "nombre": template_name,
+                "label": str(modal.result.get("label", template_name.title())),
+                "fields": modal.result.get("fields", []),
+                "ejemplos": modal.result.get("ejemplos", []),
+            }
+        )
         self._refresh_data_sources()
 
     def edit_template(self) -> None:
@@ -1519,11 +1693,34 @@ class PromptEngineUI:
         if not tpl_path.exists():
             messagebox.showerror("Plantillas", f"No existe el archivo: {tpl_path.name}")
             return
-        modal = TemplateEditorDialog(self.root, selected_name, tpl_path.read_text(encoding="utf-8"))
+        tpl_data = self._selected_item(self.plantillas, selected_name) or {
+            "nombre": selected_name,
+            "label": selected_name.title(),
+            "fields": [],
+            "ejemplos": [],
+        }
+        modal = TemplateEditorDialog(self.root, tpl_data, tpl_path.read_text(encoding="utf-8"))
         self.root.wait_window(modal)
-        if modal.content is None:
+        if not modal.result:
             return
-        tpl_path.write_text(modal.content, encoding="utf-8")
+        tpl_path.write_text(str(modal.result.get("content", "")), encoding="utf-8")
+        saved = update_plantilla(
+            selected_name,
+            {
+                "label": str(modal.result.get("label", tpl_data.get("label", ""))),
+                "fields": modal.result.get("fields", []),
+                "ejemplos": modal.result.get("ejemplos", []),
+            },
+        )
+        if not saved:
+            upsert_plantilla(
+                {
+                    "nombre": selected_name,
+                    "label": str(modal.result.get("label", tpl_data.get("label", ""))),
+                    "fields": modal.result.get("fields", []),
+                    "ejemplos": modal.result.get("ejemplos", []),
+                }
+            )
         self._refresh_data_sources()
 
     def _on_close(self) -> None:

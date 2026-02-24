@@ -103,11 +103,16 @@ def init_db() -> None:
     """
     with get_connection() as conn:
         conn.executescript(schema)
+        def _columnas(tabla: str) -> set[str]:
+            return {
+                row["name"]
+                for row in conn.execute(f"PRAGMA table_info({tabla})").fetchall()
+            }
+
         columnas_perfiles = {
             row["name"] for row in conn.execute("PRAGMA table_info(perfiles)").fetchall()
         }
         for columna in (
-            "id",
             "nombre",
             "rol",
             "rol_base",
@@ -133,10 +138,7 @@ def init_db() -> None:
             """
         )
 
-        columnas_contextos = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
-        }
+        columnas_contextos = _columnas("contextos")
         for columna in (
             "nombre",
             "rol_contextual",
@@ -147,9 +149,8 @@ def init_db() -> None:
             if columna not in columnas_contextos:
                 conn.execute(f"ALTER TABLE contextos ADD COLUMN {columna} TEXT;")
 
-        if "foco" in columnas_contextos and "rol_contextual" in {
-            row["name"] for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
-        }:
+        columnas_contextos = _columnas("contextos")
+        if "foco" in columnas_contextos and "rol_contextual" in columnas_contextos:
             conn.execute(
                 """
                 UPDATE contextos
@@ -160,10 +161,7 @@ def init_db() -> None:
                 """
             )
 
-        columnas_plantillas = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(plantillas)").fetchall()
-        }
+        columnas_plantillas = _columnas("plantillas")
         for columna in ("nombre", "label", "fields", "ejemplos"):
             if columna not in columnas_plantillas:
                 conn.execute(f"ALTER TABLE plantillas ADD COLUMN {columna} TEXT;")

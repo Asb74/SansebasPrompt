@@ -7,3 +7,7 @@ dist/
 *.sqlite
 *.db
 prompt_engine/KeySecret.txt
+json_to_sqlite.py
+*555*.json
+prompt_engine/data_agro.py
+prompt_engine/plantillas/data_agro.py

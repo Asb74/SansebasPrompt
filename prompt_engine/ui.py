@@ -1000,12 +1000,42 @@ class PromptEngineUI:
         self.profile_extra_widgets.clear()
         self.profile_extra_meta.clear()
 
-        extras = self.perfil_activo.get("extras", {}) if isinstance(self.perfil_activo, dict) else {}
-        if not isinstance(extras, dict):
-            extras = {}
+        extras_fields = []
+        extras_legacy = {}
+        if isinstance(self.perfil_activo, dict):
+            extras_fields = self.perfil_activo.get("extras_fields", [])
+            extras_legacy = self.perfil_activo.get("extras", {})
 
-        for row_index, key in enumerate(sorted(extras.keys())):
-            value = "" if extras[key] is None else str(extras[key])
+        if isinstance(extras_fields, list) and extras_fields:
+            normalized_fields: list[tuple[str, str, str, str, str]] = []
+            for field in extras_fields:
+                if not isinstance(field, dict):
+                    continue
+                key = str(field.get("key", "")).strip()
+                if not key:
+                    continue
+                label = str(field.get("label", "")).strip() or key
+                help_text = str(field.get("help", "")).strip()
+                example = str(field.get("example", "")).strip()
+                default = str(field.get("default", "")).strip()
+                normalized_fields.append((label.lower(), key.lower(), key, label, default))
+                self.profile_extra_meta[key] = {"help": help_text, "example": example}
+
+            for row_index, (_sort_label, _sort_key, key, label, default) in enumerate(sorted(normalized_fields)):
+                ttk.Label(self.profile_extras_frame, text=label).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
+                entry = ttk.Entry(self.profile_extras_frame)
+                if default:
+                    entry.insert(0, default)
+                entry.grid(row=row_index, column=1, sticky="ew", pady=4)
+                entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+                self.profile_extra_widgets[key] = entry
+            return
+
+        if not isinstance(extras_legacy, dict):
+            extras_legacy = {}
+
+        for row_index, key in enumerate(sorted(extras_legacy.keys(), key=lambda item: str(item).lower())):
+            value = "" if extras_legacy[key] is None else str(extras_legacy[key])
             ttk.Label(self.profile_extras_frame, text=key).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.profile_extras_frame)
             entry.insert(0, value)
@@ -1076,16 +1106,16 @@ class PromptEngineUI:
 
         if profile_names and self.perfil_var.get() not in profile_names:
             self.perfil_var.set(profile_names[0])
-        self._on_profile_change()
         if context_names and self.contexto_var.get() not in context_names:
             self.contexto_var.set(context_names[0])
-        self._on_context_change()
         if template_names:
             if self.template_var.get() not in template_names:
                 default = "gestion" if "gestion" in template_names else template_names[0]
                 self.template_var.set(default)
             self._render_template_fields()
 
+        self._on_profile_change()
+        self._on_context_change()
         self._update_context_panel("titulo")
 
     def _selected_item(self, collection: list[dict], name: str) -> dict | None:

@@ -844,13 +844,13 @@ class PromptEngineUI:
         self.profile_extras_frame.grid(row=98, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.profile_extras_frame.columnconfigure(1, weight=1)
 
-        self.context_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de contexto", padding=8)
-        self.context_extras_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        self.context_extras_frame.columnconfigure(1, weight=1)
-
         self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
-        self.template_fields_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.template_fields_frame.columnconfigure(1, weight=1)
+
+        self.context_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de contexto", padding=8)
+        self.context_extras_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.context_extras_frame.columnconfigure(1, weight=1)
 
         right = ttk.LabelFrame(main_paned, text="Panel contextual dinámico", padding=10)
         main_paned.add(right, weight=2)
@@ -1000,34 +1000,18 @@ class PromptEngineUI:
         self.profile_extra_widgets.clear()
         self.profile_extra_meta.clear()
 
-        extras_fields = []
-        if isinstance(self.perfil_activo, dict):
-            extras_fields = self.perfil_activo.get("extras_fields", [])
-        if not isinstance(extras_fields, list):
-            extras_fields = []
+        extras = self.perfil_activo.get("extras", {}) if isinstance(self.perfil_activo, dict) else {}
+        if not isinstance(extras, dict):
+            extras = {}
 
-        row_index = 0
-        for field in extras_fields:
-            if not isinstance(field, dict):
-                continue
-            key = str(field.get("key", "")).strip()
-            if not key:
-                continue
-            label = str(field.get("label", "")).strip() or key
-            default = str(field.get("default", "")).strip()
-            self.profile_extra_meta[key] = {
-                "help": str(field.get("help", "")).strip(),
-                "example": str(field.get("example", "")).strip(),
-            }
-
-            ttk.Label(self.profile_extras_frame, text=label).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
+        for row_index, key in enumerate(sorted(extras.keys())):
+            value = "" if extras[key] is None else str(extras[key])
+            ttk.Label(self.profile_extras_frame, text=key).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.profile_extras_frame)
-            if default:
-                entry.insert(0, default)
+            entry.insert(0, value)
             entry.grid(row=row_index, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
             self.profile_extra_widgets[key] = entry
-            row_index += 1
 
     def _render_context_extras(self) -> None:
         for widget in self.context_extras_frame.winfo_children():

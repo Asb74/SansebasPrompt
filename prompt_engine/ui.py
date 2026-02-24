@@ -1815,6 +1815,8 @@ class PromptEngineUI:
                 options = list(self.perfil_combo["values"])
                 self.perfil_var.set(options[0] if options else "")
                 self._on_profile_change()
+        else:
+            messagebox.showerror("Perfiles", "No se pudo eliminar")
 
     def new_context(self) -> None:
         modal = ContextEditorDialog(self.root)
@@ -1860,6 +1862,8 @@ class PromptEngineUI:
                 options = list(self.contexto_combo["values"])
                 self.contexto_var.set(options[0] if options else "")
                 self._on_context_change()
+        else:
+            messagebox.showerror("Contextos", "No se pudo eliminar")
 
     def _template_path(self, template_name: str) -> Path:
         return Path(__file__).resolve().parent / "plantillas" / f"{template_name}.py"
@@ -1939,6 +1943,10 @@ class PromptEngineUI:
         selected_name = self._select_name("Eliminar Plantilla", [item.get("nombre", "") for item in self.plantillas])
         if not selected_name:
             return
+        core_templates = {"gestion", "it", "ventas", "contabilidad"}
+        if selected_name.lower() in core_templates:
+            messagebox.showinfo("Plantillas", "No se pueden eliminar las plantillas core.")
+            return
         if not messagebox.askyesno(
             "Eliminar Plantilla",
             f"¿Eliminar plantilla '{selected_name}'? Esta acción no se puede deshacer.",
@@ -1947,12 +1955,23 @@ class PromptEngineUI:
 
         current = self.template_var.get()
         if delete_plantilla(selected_name):
+            remove_template_file = messagebox.askyesno(
+                "Eliminar archivo de plantilla",
+                f"¿También quieres eliminar el archivo '{selected_name}.py' asociado?",
+                default=messagebox.NO,
+            )
+            if remove_template_file:
+                tpl_path = self._template_path(selected_name)
+                if tpl_path.exists():
+                    tpl_path.unlink()
             messagebox.showinfo("Plantillas", "Eliminado correctamente.")
             self._refresh_data_sources()
             if current == selected_name:
                 options = list(self.template_combo["values"])
                 self.template_var.set(options[0] if options else "")
                 self._on_template_changed()
+        else:
+            messagebox.showerror("Plantillas", "No se pudo eliminar")
 
     def _on_close(self) -> None:
         try:

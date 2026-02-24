@@ -496,3 +496,21 @@ def upsert_plantilla(payload: Dict[str, Any]) -> None:
     nombre = _text(payload.get("nombre"))
     if not actualizar_registro_json(Path("plantillas.json"), nombre, payload):
         insertar_registro_json(Path("plantillas.json"), payload)
+
+
+def delete_perfil(nombre: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM perfiles WHERE nombre = ?", (_text(nombre),))
+        return cursor.rowcount > 0
+
+
+def delete_contexto(nombre: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM contextos WHERE nombre = ?", (_text(nombre),))
+        return cursor.rowcount > 0
+
+
+def delete_plantilla(nombre: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM plantillas WHERE nombre = ?", (_text(nombre),))
+        return cursor.rowcount > 0

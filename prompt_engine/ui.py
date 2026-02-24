@@ -844,13 +844,13 @@ class PromptEngineUI:
         self.profile_extras_frame.grid(row=98, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.profile_extras_frame.columnconfigure(1, weight=1)
 
-        self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
-        self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        self.template_fields_frame.columnconfigure(1, weight=1)
-
         self.context_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de contexto", padding=8)
-        self.context_extras_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.context_extras_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.context_extras_frame.columnconfigure(1, weight=1)
+
+        self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
+        self.template_fields_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.template_fields_frame.columnconfigure(1, weight=1)
 
         right = ttk.LabelFrame(main_paned, text="Panel contextual dinámico", padding=10)
         main_paned.add(right, weight=2)

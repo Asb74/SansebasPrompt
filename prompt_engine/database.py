@@ -116,3 +116,12 @@ def init_db() -> None:
             print(">>> Añadiendo columna 'extras_fields' a perfiles")
             conn.execute("ALTER TABLE perfiles ADD COLUMN extras_fields TEXT;")
             print(">>> Columna 'extras_fields' añadida correctamente")
+
+        columnas_contextos = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
+        }
+        if "extras_fields" not in columnas_contextos:
+            print(">>> Añadiendo columna 'extras_fields' a contextos")
+            conn.execute("ALTER TABLE contextos ADD COLUMN extras_fields TEXT;")
+            print(">>> Columna 'extras_fields' añadida correctamente en contextos")

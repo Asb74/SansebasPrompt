@@ -91,10 +91,20 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def _contexto_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+    try:
+        no_hacer_raw = row["no_hacer"]
+    except (KeyError, IndexError):
+        no_hacer_raw = None
+    try:
+        extras_fields_raw = row["extras_fields"]
+    except (KeyError, IndexError):
+        extras_fields_raw = None
     return {
         "nombre": _text(row["nombre"]),
         "rol_contextual": _text(row["rol_contextual"]),
         "enfoque": _loads_json(row["enfoque"], []),
+        "no_hacer": _loads_json(no_hacer_raw, []),
+        "extras_fields": _loads_json_list(extras_fields_raw),
     }
 
 
@@ -154,13 +164,15 @@ def guardar_contextos(contextos: List[Dict[str, Any]]) -> None:
         for contexto in contextos:
             conn.execute(
                 """
-                INSERT INTO contextos (nombre, rol_contextual, enfoque)
-                VALUES (?, ?, ?)
+                INSERT INTO contextos (nombre, rol_contextual, enfoque, no_hacer, extras_fields)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     _text(contexto.get("nombre")),
                     _text(contexto.get("rol_contextual")),
                     _dumps_json(contexto.get("enfoque"), []),
+                    _dumps_json(contexto.get("no_hacer"), []),
+                    _dumps_json(contexto.get("extras_fields"), []),
                 ),
             )
 
@@ -224,13 +236,15 @@ def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -
             cursor = conn.execute(
                 """
                 UPDATE contextos
-                SET nombre = ?, rol_contextual = ?, enfoque = ?
+                SET nombre = ?, rol_contextual = ?, enfoque = ?, no_hacer = ?, extras_fields = ?
                 WHERE nombre = ?
                 """,
                 (
                     _text(payload.get("nombre")) or _text(nombre),
                     _text(payload.get("rol_contextual")),
                     _dumps_json(payload.get("enfoque"), []),
+                    _dumps_json(payload.get("no_hacer"), []),
+                    _dumps_json(payload.get("extras_fields"), []),
                     _text(nombre),
                 ),
             )
@@ -261,13 +275,18 @@ def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
 
     keys = set(payload.keys())
     with _connect() as conn:
-        if {"rol_contextual", "enfoque"} & keys:
+        if {"rol_contextual", "enfoque", "no_hacer", "extras_fields"} & keys:
             conn.execute(
-                "INSERT INTO contextos (nombre, rol_contextual, enfoque) VALUES (?, ?, ?)",
+                """
+                INSERT INTO contextos (nombre, rol_contextual, enfoque, no_hacer, extras_fields)
+                VALUES (?, ?, ?, ?, ?)
+                """,
                 (
                     _text(payload.get("nombre")),
                     _text(payload.get("rol_contextual")),
                     _dumps_json(payload.get("enfoque"), []),
+                    _dumps_json(payload.get("no_hacer"), []),
+                    _dumps_json(payload.get("extras_fields"), []),
                 ),
             )
             return

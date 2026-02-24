@@ -27,7 +27,9 @@ class DictationField(ttk.Frame):
         self.multiline = multiline
         self._is_transcribing = False
 
+        self.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
+        self.columnconfigure(1, weight=0)
 
         if multiline:
             self._field: tk.Widget = ScrolledText(self, height=height, wrap="word")

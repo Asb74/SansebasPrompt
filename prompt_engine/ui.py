@@ -723,11 +723,11 @@ class TemplateEditorDialog(tk.Toplevel):
             "default": tk.StringVar(value=initial.get("default", "")),
         }
         labels = {
-            "key": "key (obligatorio)",
-            "label": "label",
-            "help": "help",
-            "example": "example",
-            "default": "default (opcional)",
+            "key": "Clave (obligatoria)",
+            "label": "Nombre visible",
+            "help": "Descripción",
+            "example": "Ejemplo de campo",
+            "default": "Valor por defecto (opcional)",
         }
 
         for row, key in enumerate(["key", "label", "help", "example", "default"]):
@@ -1257,6 +1257,9 @@ class PromptEngineUI:
             label = field.get("label", key)
             ttk.Label(self.template_fields_frame, text=label).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.template_fields_frame)
+            default_value = field.get("default", "")
+            if default_value is not None and str(default_value).strip():
+                entry.insert(0, str(default_value))
             entry.grid(row=idx, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
             self.template_widgets[key] = entry

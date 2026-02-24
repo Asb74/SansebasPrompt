@@ -117,6 +117,27 @@ def init_db() -> None:
             print(">>> Añadiendo columna 'extras_fields' a perfiles")
             conn.execute("ALTER TABLE perfiles ADD COLUMN extras_fields TEXT;")
             print(">>> Columna 'extras_fields' añadida correctamente")
+        if "rol" not in columnas_perfiles:
+            print(">>> Añadiendo columna 'rol' a perfiles")
+            conn.execute("ALTER TABLE perfiles ADD COLUMN rol TEXT;")
+            print(">>> Columna 'rol' añadida correctamente")
+        if "herramientas" not in columnas_perfiles:
+            print(">>> Añadiendo columna 'herramientas' a perfiles")
+            conn.execute("ALTER TABLE perfiles ADD COLUMN herramientas TEXT;")
+            print(">>> Columna 'herramientas' añadida correctamente")
+        if "prioridades" not in columnas_perfiles:
+            print(">>> Añadiendo columna 'prioridades' a perfiles")
+            conn.execute("ALTER TABLE perfiles ADD COLUMN prioridades TEXT;")
+            print(">>> Columna 'prioridades' añadida correctamente")
+
+        conn.execute(
+            """
+            UPDATE perfiles
+            SET rol = rol_base
+            WHERE (rol IS NULL OR rol = '')
+              AND rol_base IS NOT NULL
+            """
+        )
 
         columnas_contextos = {
             row["name"]

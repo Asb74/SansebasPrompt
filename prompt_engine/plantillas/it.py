@@ -17,3 +17,5 @@ def render_it(payload: Dict[str, str]) -> str:
 - Solicitud adicional: propone pasos de implementación y riesgos técnicos.
 """
     return base + extra
+
+

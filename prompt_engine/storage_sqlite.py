@@ -91,6 +91,14 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 def _contexto_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+    row_keys = set(row.keys())
+
+    rol_contextual_raw = row["rol_contextual"] if "rol_contextual" in row_keys else None
+    if not _text(rol_contextual_raw) and "foco" in row_keys:
+        rol_contextual_raw = row["foco"]
+
+    enfoque_raw = row["enfoque"] if "enfoque" in row_keys else None
+
     try:
         no_hacer_raw = row["no_hacer"]
     except (KeyError, IndexError):
@@ -101,8 +109,8 @@ def _contexto_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         extras_fields_raw = None
     return {
         "nombre": _text(row["nombre"]),
-        "rol_contextual": _text(row["rol_contextual"]),
-        "enfoque": _loads_json(row["enfoque"], []),
+        "rol_contextual": _text(rol_contextual_raw),
+        "enfoque": _loads_json(enfoque_raw, []),
         "no_hacer": _loads_json(no_hacer_raw, []),
         "extras_fields": _loads_json_list(extras_fields_raw),
     }

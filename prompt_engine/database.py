@@ -103,32 +103,25 @@ def init_db() -> None:
     """
     with get_connection() as conn:
         conn.executescript(schema)
-        print(">>> Verificando columnas de perfiles...")
         columnas_perfiles = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(perfiles)").fetchall()
+            row["name"] for row in conn.execute("PRAGMA table_info(perfiles)").fetchall()
         }
-        print(">>> Columnas actuales en perfiles:", columnas_perfiles)
-        if "extras" not in columnas_perfiles:
-            print(">>> Añadiendo columna 'extras' a perfiles")
-            conn.execute("ALTER TABLE perfiles ADD COLUMN extras TEXT;")
-            print(">>> Columna 'extras' añadida correctamente")
-        if "extras_fields" not in columnas_perfiles:
-            print(">>> Añadiendo columna 'extras_fields' a perfiles")
-            conn.execute("ALTER TABLE perfiles ADD COLUMN extras_fields TEXT;")
-            print(">>> Columna 'extras_fields' añadida correctamente")
-        if "rol" not in columnas_perfiles:
-            print(">>> Añadiendo columna 'rol' a perfiles")
-            conn.execute("ALTER TABLE perfiles ADD COLUMN rol TEXT;")
-            print(">>> Columna 'rol' añadida correctamente")
-        if "herramientas" not in columnas_perfiles:
-            print(">>> Añadiendo columna 'herramientas' a perfiles")
-            conn.execute("ALTER TABLE perfiles ADD COLUMN herramientas TEXT;")
-            print(">>> Columna 'herramientas' añadida correctamente")
-        if "prioridades" not in columnas_perfiles:
-            print(">>> Añadiendo columna 'prioridades' a perfiles")
-            conn.execute("ALTER TABLE perfiles ADD COLUMN prioridades TEXT;")
-            print(">>> Columna 'prioridades' añadida correctamente")
+        for columna in (
+            "id",
+            "nombre",
+            "rol",
+            "rol_base",
+            "empresa",
+            "ubicacion",
+            "herramientas",
+            "estilo",
+            "nivel_tecnico",
+            "prioridades",
+            "extras",
+            "extras_fields",
+        ):
+            if columna not in columnas_perfiles:
+                conn.execute(f"ALTER TABLE perfiles ADD COLUMN {columna} TEXT;")
 
         conn.execute(
             """
@@ -136,6 +129,7 @@ def init_db() -> None:
             SET rol = rol_base
             WHERE (rol IS NULL OR rol = '')
               AND rol_base IS NOT NULL
+              AND rol_base != ''
             """
         )
 
@@ -143,18 +137,18 @@ def init_db() -> None:
             row["name"]
             for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
         }
-        if "rol_contextual" not in columnas_contextos:
-            conn.execute("ALTER TABLE contextos ADD COLUMN rol_contextual TEXT;")
-        if "enfoque" not in columnas_contextos:
-            conn.execute("ALTER TABLE contextos ADD COLUMN enfoque TEXT;")
-        if "no_hacer" not in columnas_contextos:
-            conn.execute("ALTER TABLE contextos ADD COLUMN no_hacer TEXT;")
-        if "extras_fields" not in columnas_contextos:
-            conn.execute("ALTER TABLE contextos ADD COLUMN extras_fields TEXT;")
+        for columna in (
+            "nombre",
+            "rol_contextual",
+            "enfoque",
+            "no_hacer",
+            "extras_fields",
+        ):
+            if columna not in columnas_contextos:
+                conn.execute(f"ALTER TABLE contextos ADD COLUMN {columna} TEXT;")
 
         if "foco" in columnas_contextos and "rol_contextual" in {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
+            row["name"] for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
         }:
             conn.execute(
                 """
@@ -162,8 +156,17 @@ def init_db() -> None:
                 SET rol_contextual = foco
                 WHERE (rol_contextual IS NULL OR rol_contextual = '')
                   AND foco IS NOT NULL
+                  AND foco != ''
                 """
             )
+
+        columnas_plantillas = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(plantillas)").fetchall()
+        }
+        for columna in ("nombre", "label", "fields", "ejemplos"):
+            if columna not in columnas_plantillas:
+                conn.execute(f"ALTER TABLE plantillas ADD COLUMN {columna} TEXT;")
 
         columnas_tareas = {
             row["name"] for row in conn.execute("PRAGMA table_info(tareas)").fetchall()

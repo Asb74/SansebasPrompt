@@ -18,6 +18,9 @@ from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
 from .storage_sqlite import (
+    delete_contexto,
+    delete_perfil,
+    delete_plantilla,
     eliminar_tarea,
     get_contextos,
     get_perfiles,
@@ -925,12 +928,15 @@ class PromptEngineUI:
         archivo = tk.Menu(menubar, tearoff=False)
         archivo.add_command(label="Nuevo Perfil", command=self.new_profile)
         archivo.add_command(label="Editar Perfil", command=self.edit_profile)
+        archivo.add_command(label="Eliminar Perfil…", command=self.delete_profile)
         archivo.add_separator()
         archivo.add_command(label="Nuevo Contexto", command=self.new_context)
         archivo.add_command(label="Editar Contexto", command=self.edit_context)
+        archivo.add_command(label="Eliminar Contexto…", command=self.delete_context)
         archivo.add_separator()
         archivo.add_command(label="Nueva Plantilla", command=self.new_template)
         archivo.add_command(label="Editar Plantilla", command=self.edit_template)
+        archivo.add_command(label="Eliminar Plantilla…", command=self.delete_template)
         archivo.add_separator()
         archivo.add_command(label="Salir", command=self._on_close)
         menubar.add_cascade(label="Archivo", menu=archivo)
@@ -1790,6 +1796,26 @@ class PromptEngineUI:
         self.perfil_var.set(selected_name)
         self._on_profile_change()
 
+    def delete_profile(self) -> None:
+        self.perfiles = get_perfiles()
+        selected_name = self._select_name("Eliminar Perfil", [item.get("nombre", "") for item in self.perfiles])
+        if not selected_name:
+            return
+        if not messagebox.askyesno(
+            "Eliminar Perfil",
+            f"¿Eliminar perfil '{selected_name}'? Esta acción no se puede deshacer.",
+        ):
+            return
+
+        current = self.perfil_var.get()
+        if delete_perfil(selected_name):
+            messagebox.showinfo("Perfiles", "Eliminado correctamente.")
+            self._refresh_data_sources()
+            if current == selected_name:
+                options = list(self.perfil_combo["values"])
+                self.perfil_var.set(options[0] if options else "")
+                self._on_profile_change()
+
     def new_context(self) -> None:
         modal = ContextEditorDialog(self.root)
         self.root.wait_window(modal)
@@ -1814,6 +1840,26 @@ class PromptEngineUI:
         updated = modal.result
         update_contexto(original_name, updated)
         self._refresh_data_sources()
+
+    def delete_context(self) -> None:
+        self.contextos = get_contextos()
+        selected_name = self._select_name("Eliminar Contexto", [item.get("nombre", "") for item in self.contextos])
+        if not selected_name:
+            return
+        if not messagebox.askyesno(
+            "Eliminar Contexto",
+            f"¿Eliminar contexto '{selected_name}'? Esta acción no se puede deshacer.",
+        ):
+            return
+
+        current = self.contexto_var.get()
+        if delete_contexto(selected_name):
+            messagebox.showinfo("Contextos", "Eliminado correctamente.")
+            self._refresh_data_sources()
+            if current == selected_name:
+                options = list(self.contexto_combo["values"])
+                self.contexto_var.set(options[0] if options else "")
+                self._on_context_change()
 
     def _template_path(self, template_name: str) -> Path:
         return Path(__file__).resolve().parent / "plantillas" / f"{template_name}.py"
@@ -1887,6 +1933,26 @@ class PromptEngineUI:
                 }
             )
         self._refresh_data_sources()
+
+    def delete_template(self) -> None:
+        self.plantillas = get_plantillas()
+        selected_name = self._select_name("Eliminar Plantilla", [item.get("nombre", "") for item in self.plantillas])
+        if not selected_name:
+            return
+        if not messagebox.askyesno(
+            "Eliminar Plantilla",
+            f"¿Eliminar plantilla '{selected_name}'? Esta acción no se puede deshacer.",
+        ):
+            return
+
+        current = self.template_var.get()
+        if delete_plantilla(selected_name):
+            messagebox.showinfo("Plantillas", "Eliminado correctamente.")
+            self._refresh_data_sources()
+            if current == selected_name:
+                options = list(self.template_combo["values"])
+                self.template_var.set(options[0] if options else "")
+                self._on_template_changed()
 
     def _on_close(self) -> None:
         try:

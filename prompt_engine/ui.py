@@ -896,6 +896,9 @@ class PromptEngineUI:
         self.plantillas = get_plantillas()
         self.history_cache: list[Tarea] = []
         self.current_task: Tarea | None = None
+        self.is_dirty = False
+        self.last_saved_prompt = ""
+        self.pending_reset_after_save = False
 
         self.perfil_var = tk.StringVar()
         self.contexto_var = tk.StringVar()
@@ -938,8 +941,8 @@ class PromptEngineUI:
         root_frame = ttk.Frame(self.root, padding=12)
         root_frame.pack(fill="both", expand=True)
         root_frame.columnconfigure(0, weight=1)
-        root_frame.rowconfigure(0, weight=3)
-        root_frame.rowconfigure(1, weight=2)
+        root_frame.rowconfigure(0, weight=2)
+        root_frame.rowconfigure(1, weight=3)
         root_frame.rowconfigure(2, weight=0)
 
         main_paned = ttk.PanedWindow(root_frame, orient="horizontal")
@@ -1005,6 +1008,7 @@ class PromptEngineUI:
             self.base_widgets[field] = widget
             focus_widget = widget.get_widget() if isinstance(widget, DictationField) else widget
             focus_widget.bind("<FocusIn>", lambda _e, f=field: self._update_context_panel(f))
+            focus_widget.bind("<KeyRelease>", self._mark_dirty)
 
         self.profile_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de perfil", padding=8)
         self.profile_extras_frame.grid(row=98, column=0, columnspan=2, sticky="ew", pady=(8, 0))
@@ -1043,6 +1047,7 @@ class PromptEngineUI:
 
         self.prompt_box = DictationField(prompt_tab, self.voice_input, multiline=True)
         self.prompt_box.grid(row=0, column=0, sticky="nsew")
+        self.prompt_box.get_widget().bind("<KeyRelease>", self._mark_dirty)
 
         attachments_tab = ttk.Frame(output_tabs)
         attachments_tab.columnconfigure(0, weight=1)
@@ -1074,9 +1079,69 @@ class PromptEngineUI:
         actions_row.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(actions_row, text="Generar Prompt", command=self._generate_prompt).pack(side="left", padx=(0, 6))
         ttk.Button(actions_row, text="Guardar", command=self._save_prompt).pack(side="left", padx=6)
+        ttk.Button(actions_row, text="Nuevo prompt", command=self.new_prompt).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Exportar PDF", command=self._export_pdf).pack(side="left", padx=6)
         ttk.Button(actions_row, text="Historial", command=self._open_history).pack(side="left", padx=6)
         ttk.Button(actions_row, text="📋 Copiar Prompt", command=self._copy_prompt).pack(side="left", padx=6)
+
+    def _mark_dirty(self, _event=None) -> None:
+        self.is_dirty = True
+
+    def _has_content_to_lose(self) -> bool:
+        has_base_content = any(self._read_widget(self.base_widgets[field]).strip() for field, _ in BASE_FIELDS)
+        has_template_content = any(entry.get().strip() for entry in self.template_widgets.values())
+        has_profile_content = any(entry.get().strip() for entry in self.profile_extra_widgets.values())
+        has_context_content = any(entry.get().strip() for entry in self.context_extra_widgets.values())
+        has_prompt_content = bool(self.prompt_box.get_text().strip())
+        has_attachments = bool(self.attachment_paths)
+        return any(
+            [
+                has_base_content,
+                has_template_content,
+                has_profile_content,
+                has_context_content,
+                has_prompt_content,
+                has_attachments,
+            ]
+        )
+
+    def _reset_form(self) -> None:
+        for field, _label in BASE_FIELDS:
+            self._write_widget(self.base_widgets[field], "")
+
+        for widget in self.template_widgets.values():
+            self._write_widget(widget, "")
+        for widget in self.profile_extra_widgets.values():
+            self._write_widget(widget, "")
+        for widget in self.context_extra_widgets.values():
+            self._write_widget(widget, "")
+
+        self.prompt_box.set_text("")
+        self.attachment_paths.clear()
+        self._refresh_attachment_list()
+        self.current_task = None
+        self.is_dirty = False
+        self.pending_reset_after_save = False
+
+    def new_prompt(self) -> None:
+        if not self._has_content_to_lose():
+            self._reset_form()
+            return
+
+        if self.is_dirty:
+            decision = messagebox.askyesnocancel(
+                "Nuevo prompt",
+                "Tienes cambios sin guardar. ¿Quieres guardar antes de limpiar?",
+            )
+            if decision is None:
+                return
+            if decision:
+                self.pending_reset_after_save = True
+                if not self.save_task():
+                    self.pending_reset_after_save = False
+                return
+
+        self._reset_form()
 
     def _generate_prompt(self) -> None:
         self.generate_prompt()
@@ -1194,6 +1259,7 @@ class PromptEngineUI:
                     entry.insert(0, default)
                 entry.grid(row=row_index, column=1, sticky="ew", pady=4)
                 entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+                entry.bind("<KeyRelease>", self._mark_dirty)
                 self.profile_extra_widgets[key] = entry
             return
 
@@ -1207,6 +1273,7 @@ class PromptEngineUI:
             entry.insert(0, value)
             entry.grid(row=row_index, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+            entry.bind("<KeyRelease>", self._mark_dirty)
             self.profile_extra_widgets[key] = entry
 
     def _render_context_extras(self) -> None:
@@ -1241,6 +1308,7 @@ class PromptEngineUI:
                 entry.insert(0, default)
             entry.grid(row=row_index, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+            entry.bind("<KeyRelease>", self._mark_dirty)
             self.context_extra_widgets[key] = entry
             row_index += 1
 
@@ -1262,6 +1330,7 @@ class PromptEngineUI:
                 entry.insert(0, str(default_value))
             entry.grid(row=idx, column=1, sticky="ew", pady=4)
             entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+            entry.bind("<KeyRelease>", self._mark_dirty)
             self.template_widgets[key] = entry
 
     def _reload_selectors(self) -> None:
@@ -1418,15 +1487,15 @@ class PromptEngineUI:
         self.attachment_paths.pop(idx)
         self._refresh_attachment_list()
 
-    def save_task(self) -> None:
+    def save_task(self) -> bool:
         prompt = self.prompt_box.get_text()
         if not prompt:
             messagebox.showwarning("Sin prompt", "Genera o escribe un prompt antes de guardar.")
-            return
+            return False
 
         if self.current_task is None:
             if not self._validate_required():
-                return
+                return False
             data = self._collect_form_data()
             self.current_task = Tarea(
                 id=generate_task_id(),
@@ -1448,6 +1517,7 @@ class PromptEngineUI:
 
         future = self.executor.submit(guardar_tarea, self.current_task)
         self.root.after(40, lambda: self._poll_future(future, "Tarea guardada correctamente."))
+        return True
 
     def export_pdf(self) -> None:
         prompt = self.prompt_box.get_text()
@@ -1479,8 +1549,14 @@ class PromptEngineUI:
         try:
             future.result()
             self._refresh_history()
+            if success_message == "Tarea guardada correctamente.":
+                self.is_dirty = False
+                self.last_saved_prompt = self.prompt_box.get_text()
+                if self.pending_reset_after_save:
+                    self._reset_form()
             messagebox.showinfo("Operación completada", success_message)
         except RuntimeError as exc:
+            self.pending_reset_after_save = False
             messagebox.showerror("Error", str(exc))
 
     def _refresh_history(self) -> None:
@@ -1507,6 +1583,7 @@ class PromptEngineUI:
         self.prompt_box.set_text(task.prompt_generado)
         self.attachment_paths = []
         self._refresh_attachment_list()
+        self.is_dirty = False
 
         payload: dict[str, object] | None = None
         if task.payload_json:
@@ -1543,6 +1620,7 @@ class PromptEngineUI:
         self.prompt_box.set_text(clone.prompt_generado)
         self.attachment_paths = []
         self._refresh_attachment_list()
+        self.is_dirty = False
 
         payload: dict[str, object] | None = None
         if clone.payload_json:
@@ -1604,6 +1682,7 @@ class PromptEngineUI:
             self._write_widget(widget, payload.get(key, ""))
         for key, widget in self.context_extra_widgets.items():
             self._write_widget(widget, payload.get(key, ""))
+        self.is_dirty = False
 
     def _history_export_pdf(self, task_id: str) -> None:
         task = self._task_by_id(task_id)

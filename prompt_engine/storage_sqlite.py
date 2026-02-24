@@ -43,6 +43,17 @@ def _loads_json_object(value: Any) -> Dict[str, Any]:
     return {}
 
 
+def _loads_json_list(value: Any) -> List[Dict[str, Any]]:
+    payload = _loads_json(value, [])
+    if not isinstance(payload, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for item in payload:
+        if isinstance(item, dict):
+            cleaned.append(item)
+    return cleaned
+
+
 def _text(value: Any, default: str = "") -> str:
     if value is None:
         return default
@@ -60,6 +71,10 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         extras_raw = row["extras"]
     except (KeyError, IndexError):
         extras_raw = None
+    try:
+        extras_fields_raw = row["extras_fields"]
+    except (KeyError, IndexError):
+        extras_fields_raw = None
     return {
         "nombre": _text(row["nombre"]),
         "rol": rol,
@@ -71,6 +86,7 @@ def _perfil_from_row(row: sqlite3.Row) -> Dict[str, Any]:
         "nivel_tecnico": _text(row["nivel_tecnico"]),
         "prioridades": _loads_json(row["prioridades"], []),
         "extras": _loads_json_object(extras_raw),
+        "extras_fields": _loads_json_list(extras_fields_raw),
     }
 
 
@@ -107,8 +123,8 @@ def guardar_perfiles(perfiles: List[Dict[str, Any]]) -> None:
                 """
                 INSERT INTO perfiles (
                     nombre, rol, rol_base, empresa, ubicacion,
-                    herramientas, estilo, nivel_tecnico, prioridades, extras
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    herramientas, estilo, nivel_tecnico, prioridades, extras, extras_fields
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _text(perfil.get("nombre")),
@@ -121,6 +137,7 @@ def guardar_perfiles(perfiles: List[Dict[str, Any]]) -> None:
                     _text(perfil.get("nivel_tecnico")),
                     _dumps_json(perfil.get("prioridades"), []),
                     _dumps_json(perfil.get("extras"), {}),
+                    _dumps_json(perfil.get("extras_fields"), []),
                 ),
             )
 
@@ -183,7 +200,7 @@ def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -
                 """
                 UPDATE perfiles
                 SET nombre = ?, rol = ?, rol_base = ?, empresa = ?, ubicacion = ?,
-                    herramientas = ?, estilo = ?, nivel_tecnico = ?, prioridades = ?, extras = ?
+                    herramientas = ?, estilo = ?, nivel_tecnico = ?, prioridades = ?, extras = ?, extras_fields = ?
                 WHERE nombre = ?
                 """,
                 (
@@ -197,6 +214,7 @@ def actualizar_registro_json(path: Path, nombre: str, payload: Dict[str, Any]) -
                     _text(payload.get("nivel_tecnico")),
                     _dumps_json(payload.get("prioridades"), []),
                     _dumps_json(payload.get("extras"), {}),
+                    _dumps_json(payload.get("extras_fields"), []),
                     _text(nombre),
                 ),
             )
@@ -270,8 +288,8 @@ def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
             """
             INSERT INTO perfiles (
                 nombre, rol, rol_base, empresa, ubicacion,
-                herramientas, estilo, nivel_tecnico, prioridades, extras
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                herramientas, estilo, nivel_tecnico, prioridades, extras, extras_fields
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _text(payload.get("nombre")),
@@ -284,6 +302,7 @@ def insertar_registro_json(path: Path, payload: Dict[str, Any]) -> None:
                 _text(payload.get("nivel_tecnico")),
                 _dumps_json(payload.get("prioridades"), []),
                 _dumps_json(payload.get("extras"), {}),
+                _dumps_json(payload.get("extras_fields"), []),
             ),
         )
 

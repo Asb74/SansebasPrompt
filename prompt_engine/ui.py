@@ -218,11 +218,21 @@ class ProfileEditorDialog(tk.Toplevel):
         self.grab_set()
         self.result: dict | None = None
         initial = dict(profile or {})
-        extras = initial.get("extras")
-        if isinstance(extras, dict):
-            self.extras: dict[str, str] = {str(key): str(value) for key, value in extras.items()}
+        extras_fields = initial.get("extras_fields")
+        if isinstance(extras_fields, list):
+            self.extras_fields: list[dict[str, str]] = [
+                {
+                    "key": str(item.get("key", "")).strip(),
+                    "label": str(item.get("label", "")).strip(),
+                    "help": str(item.get("help", "")).strip(),
+                    "example": str(item.get("example", "")).strip(),
+                    "default": str(item.get("default", "")).strip(),
+                }
+                for item in extras_fields
+                if isinstance(item, dict) and str(item.get("key", "")).strip()
+            ]
         else:
-            self.extras = {}
+            self.extras_fields = []
 
         self.fields: dict[str, tk.Widget] = {}
         form = ttk.Frame(self, padding=12)
@@ -282,16 +292,18 @@ class ProfileEditorDialog(tk.Toplevel):
 
     def _refresh_extras(self) -> None:
         self.extras_listbox.delete(0, tk.END)
-        for key in sorted(self.extras):
-            self.extras_listbox.insert(tk.END, key)
+        for item in self.extras_fields:
+            label = item.get("label") or item.get("key", "")
+            self.extras_listbox.insert(tk.END, f"{label} ({item.get('key', '')})")
 
-    def _selected_extra_key(self) -> str | None:
+    def _selected_extra_index(self) -> int | None:
         selection = self.extras_listbox.curselection()
         if not selection:
             return None
-        return str(self.extras_listbox.get(selection[0]))
+        return int(selection[0])
 
-    def _extra_editor(self, title: str, key: str = "", value: str = "", key_editable: bool = True) -> tuple[str, str] | None:
+    def _extra_editor(self, title: str, initial: dict[str, str] | None = None) -> dict[str, str] | None:
+        initial = initial or {}
         dialog = tk.Toplevel(self)
         _set_app_icon(dialog)
         dialog.title(title)
@@ -303,32 +315,38 @@ class ProfileEditorDialog(tk.Toplevel):
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Clave").grid(row=0, column=0, sticky="w", pady=(0, 8), padx=(0, 8))
-        key_var = tk.StringVar(value=key)
-        key_entry = ttk.Entry(frame, textvariable=key_var)
-        key_entry.grid(row=0, column=1, sticky="ew", pady=(0, 8))
-        if not key_editable:
-            key_entry.configure(state="disabled")
+        vars_map = {
+            "key": tk.StringVar(value=initial.get("key", "")),
+            "label": tk.StringVar(value=initial.get("label", "")),
+            "help": tk.StringVar(value=initial.get("help", "")),
+            "example": tk.StringVar(value=initial.get("example", "")),
+            "default": tk.StringVar(value=initial.get("default", "")),
+        }
+        labels = {
+            "key": "Clave técnica",
+            "label": "Etiqueta visible",
+            "help": "Descripción",
+            "example": "Ejemplo",
+            "default": "Valor por defecto (opcional)",
+        }
 
-        ttk.Label(frame, text="Valor").grid(row=1, column=0, sticky="nw", padx=(0, 8))
-        value_widget = ScrolledText(frame, height=5, wrap="word")
-        value_widget.insert("1.0", value)
-        value_widget.grid(row=1, column=1, sticky="ew")
+        for row, key in enumerate(["key", "label", "help", "example", "default"]):
+            ttk.Label(frame, text=labels[key]).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
+            ttk.Entry(frame, textvariable=vars_map[key]).grid(row=row, column=1, sticky="ew", pady=4)
 
-        result: tuple[str, str] | None = None
+        result: dict[str, str] | None = None
 
         def save_and_close() -> None:
             nonlocal result
-            final_key = key_var.get().strip()
+            final_key = vars_map["key"].get().strip()
             if not final_key:
-                messagebox.showwarning("Validación", "La clave es obligatoria.", parent=dialog)
+                messagebox.showwarning("Validación", "La clave técnica es obligatoria.", parent=dialog)
                 return
-            final_value = value_widget.get("1.0", "end").strip()
-            result = (final_key, final_value)
+            result = {name: var.get().strip() for name, var in vars_map.items()}
             dialog.destroy()
 
         buttons = ttk.Frame(frame)
-        buttons.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        buttons.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(buttons, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(6, 0))
         ttk.Button(buttons, text="Guardar", command=save_and_close).pack(side="right")
 
@@ -339,28 +357,26 @@ class ProfileEditorDialog(tk.Toplevel):
         edited = self._extra_editor("Añadir campo")
         if not edited:
             return
-        key, value = edited
-        self.extras[key] = value
+        self.extras_fields.append(edited)
         self._refresh_extras()
 
     def _edit_extra(self) -> None:
-        key = self._selected_extra_key()
-        if not key:
-            messagebox.showinfo("Campos personalizados", "Selecciona una clave para editar.", parent=self)
+        idx = self._selected_extra_index()
+        if idx is None:
+            messagebox.showinfo("Campos personalizados", "Selecciona un campo para editar.", parent=self)
             return
-        edited = self._extra_editor("Editar campo", key=key, value=self.extras.get(key, ""), key_editable=False)
+        edited = self._extra_editor("Editar campo", initial=self.extras_fields[idx])
         if not edited:
             return
-        _, value = edited
-        self.extras[key] = value
+        self.extras_fields[idx] = edited
         self._refresh_extras()
 
     def _delete_extra(self) -> None:
-        key = self._selected_extra_key()
-        if not key:
-            messagebox.showinfo("Campos personalizados", "Selecciona una clave para eliminar.", parent=self)
+        idx = self._selected_extra_index()
+        if idx is None:
+            messagebox.showinfo("Campos personalizados", "Selecciona un campo para eliminar.", parent=self)
             return
-        self.extras.pop(key, None)
+        self.extras_fields.pop(idx)
         self._refresh_extras()
 
     @staticmethod
@@ -381,7 +397,8 @@ class ProfileEditorDialog(tk.Toplevel):
         payload["herramientas"] = self._split_lines(payload.get("herramientas", ""))
         payload["prioridades"] = self._split_lines(payload.get("prioridades", ""))
         payload["rol"] = payload.get("rol_base", "")
-        payload["extras"] = dict(self.extras)
+        payload["extras_fields"] = list(self.extras_fields)
+        payload.setdefault("extras", {})
         self.result = payload
         self.destroy()
 
@@ -591,6 +608,7 @@ class PromptEngineUI:
 
         self.base_widgets: dict[str, tk.Widget | DictationField] = {}
         self.profile_extra_widgets: dict[str, ttk.Entry] = {}
+        self.profile_extra_meta: dict[str, dict[str, str]] = {}
         self.template_widgets: dict[str, ttk.Entry] = {}
         self.attachment_paths: list[Path] = []
 
@@ -801,6 +819,10 @@ class PromptEngineUI:
             help_text, sample = base_help
         else:
             help_text, sample = self._template_help(field)
+            profile_meta = self.profile_extra_meta.get(field, {})
+            if not help_text and profile_meta:
+                help_text = profile_meta.get("help", "")
+                sample = profile_meta.get("example", "")
 
         self.context_title.configure(text=f"Campo activo: {field}")
         self.context_examples_title.configure(text=f"Ejemplos ({tpl.get('nombre', 'plantilla')})")
@@ -828,22 +850,36 @@ class PromptEngineUI:
         for widget in self.profile_extras_frame.winfo_children():
             widget.destroy()
         self.profile_extra_widgets.clear()
+        self.profile_extra_meta.clear()
 
-        extras = {}
+        extras_fields = []
         if isinstance(self.perfil_activo, dict):
-            extras = self.perfil_activo.get("extras", {})
-        if not isinstance(extras, dict):
-            extras = {}
+            extras_fields = self.perfil_activo.get("extras_fields", [])
+        if not isinstance(extras_fields, list):
+            extras_fields = []
 
-        for idx, key in enumerate(sorted(extras)):
-            value = extras[key]
-            key_text = str(key)
-            ttk.Label(self.profile_extras_frame, text=key_text).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 8))
+        row_index = 0
+        for field in extras_fields:
+            if not isinstance(field, dict):
+                continue
+            key = str(field.get("key", "")).strip()
+            if not key:
+                continue
+            label = str(field.get("label", "")).strip() or key
+            default = str(field.get("default", "")).strip()
+            self.profile_extra_meta[key] = {
+                "help": str(field.get("help", "")).strip(),
+                "example": str(field.get("example", "")).strip(),
+            }
+
+            ttk.Label(self.profile_extras_frame, text=label).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
             entry = ttk.Entry(self.profile_extras_frame)
-            entry.insert(0, str(value))
-            entry.grid(row=idx, column=1, sticky="ew", pady=4)
-            entry.bind("<FocusIn>", lambda _e, f=key_text: self._update_context_panel(f))
-            self.profile_extra_widgets[key_text] = entry
+            if default:
+                entry.insert(0, default)
+            entry.grid(row=row_index, column=1, sticky="ew", pady=4)
+            entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+            self.profile_extra_widgets[key] = entry
+            row_index += 1
 
     def _render_template_fields(self) -> None:
         for widget in self.template_fields_frame.winfo_children():

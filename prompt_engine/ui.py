@@ -1508,6 +1508,19 @@ class PromptEngineUI:
         self.attachment_paths = []
         self._refresh_attachment_list()
 
+        payload: dict[str, object] | None = None
+        if task.payload_json:
+            try:
+                loaded = json.loads(task.payload_json)
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except json.JSONDecodeError:
+                payload = None
+
+        if payload is not None:
+            self._rehydrate_form_from_payload(payload, task.usuario, task.contexto, task.area)
+            messagebox.showinfo("Ver prompt", "Formulario rehidratado. Puedes editar y regenerar.")
+
     def _history_clone_task(self, task_id: str) -> None:
         source = self._task_by_id(task_id)
         if not source:
@@ -1531,27 +1544,6 @@ class PromptEngineUI:
         self.attachment_paths = []
         self._refresh_attachment_list()
 
-        self._refresh_data_sources()
-
-        perfil_values = list(self.perfil_combo["values"])
-        contexto_values = list(self.contexto_combo["values"])
-        template_values = list(self.template_combo["values"])
-
-        if clone.usuario in perfil_values:
-            self.perfil_var.set(clone.usuario)
-        elif perfil_values:
-            self.perfil_var.set(perfil_values[0])
-
-        if clone.contexto in contexto_values:
-            self.contexto_var.set(clone.contexto)
-        elif contexto_values:
-            self.contexto_var.set(contexto_values[0])
-
-        if clone.area in template_values:
-            self.template_var.set(clone.area)
-        elif template_values:
-            self.template_var.set(template_values[0])
-
         payload: dict[str, object] | None = None
         if clone.payload_json:
             try:
@@ -1562,29 +1554,56 @@ class PromptEngineUI:
                 payload = None
 
         if payload is not None:
-            self._on_profile_change()
-            self._on_context_change()
-            self._on_template_changed()
-
-            for field, _label in BASE_FIELDS:
-                widget = self.base_widgets.get(field)
-                if widget is not None:
-                    self._write_widget(widget, payload.get(field, ""))
-
-            for key, widget in self.template_widgets.items():
-                self._write_widget(widget, payload.get(key, ""))
-            for key, widget in self.profile_extra_widgets.items():
-                self._write_widget(widget, payload.get(key, ""))
-            for key, widget in self.context_extra_widgets.items():
-                self._write_widget(widget, payload.get(key, ""))
+            self._rehydrate_form_from_payload(payload, clone.usuario, clone.contexto, clone.area)
 
             messagebox.showinfo("Clonar tarea", "Tarea clonada y formulario rehidratado. Puedes editar y guardar.")
             return
 
+        self._refresh_data_sources()
+        if clone.area in list(self.template_combo["values"]):
+            self.template_var.set(clone.area)
         if clone.area:
             self._on_template_changed()
 
         messagebox.showinfo("Clonar tarea", "Tarea clonada en memoria. Puedes editar y guardar.")
+
+    def _rehydrate_form_from_payload(self, payload: dict[str, object], usuario: str, contexto: str, area: str) -> None:
+        self._refresh_data_sources()
+
+        perfil_values = list(self.perfil_combo["values"])
+        contexto_values = list(self.contexto_combo["values"])
+        template_values = list(self.template_combo["values"])
+
+        if usuario in perfil_values:
+            self.perfil_var.set(usuario)
+        elif perfil_values:
+            self.perfil_var.set(perfil_values[0])
+
+        if contexto in contexto_values:
+            self.contexto_var.set(contexto)
+        elif contexto_values:
+            self.contexto_var.set(contexto_values[0])
+
+        if area in template_values:
+            self.template_var.set(area)
+        elif template_values:
+            self.template_var.set(template_values[0])
+
+        self._on_profile_change()
+        self._on_context_change()
+        self._on_template_changed()
+
+        for field, _label in BASE_FIELDS:
+            widget = self.base_widgets.get(field)
+            if widget is not None:
+                self._write_widget(widget, payload.get(field, ""))
+
+        for key, widget in self.template_widgets.items():
+            self._write_widget(widget, payload.get(key, ""))
+        for key, widget in self.profile_extra_widgets.items():
+            self._write_widget(widget, payload.get(key, ""))
+        for key, widget in self.context_extra_widgets.items():
+            self._write_widget(widget, payload.get(key, ""))
 
     def _history_export_pdf(self, task_id: str) -> None:
         task = self._task_by_id(task_id)

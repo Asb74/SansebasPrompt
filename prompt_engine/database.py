@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 
-from .db_config import get_db_path
+from .app_paths import ensure_user_dirs, get_db_path
 
 
 def get_connection() -> sqlite3.Connection:
     """Crea una conexión SQLite configurada (no compartida)."""
+    ensure_user_dirs()
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")

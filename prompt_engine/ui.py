@@ -1301,6 +1301,19 @@ class PromptEngineUI:
             return widget.get("1.0", "end").strip()
         return widget.get().strip()
 
+    @staticmethod
+    def _write_widget(widget: tk.Widget | DictationField, value: object) -> None:
+        text = "" if value is None else str(value)
+        if isinstance(widget, DictationField):
+            widget.set_text(text)
+            return
+        if isinstance(widget, tk.Text):
+            widget.delete("1.0", "end")
+            widget.insert("1.0", text)
+            return
+        widget.delete(0, "end")
+        widget.insert(0, text)
+
     def _collect_form_data(self) -> dict[str, str]:
         data = {"area": self.template_var.get()}
         for field, _ in BASE_FIELDS:
@@ -1347,6 +1360,7 @@ class PromptEngineUI:
             messagebox.showerror("Adjuntos", str(exc))
             return
         self.prompt_box.set_text(prompt)
+        payload_json = json.dumps(data, ensure_ascii=False)
 
         self.current_task = Tarea(
             id=generate_task_id(),
@@ -1358,6 +1372,7 @@ class PromptEngineUI:
             restricciones=data.get("restricciones", ""),
             formato_salida=data.get("formato_salida", ""),
             prioridad=data.get("prioridad", "Media"),
+            payload_json=payload_json,
             prompt_generado=prompt,
         )
 
@@ -1423,10 +1438,13 @@ class PromptEngineUI:
                 restricciones=data.get("restricciones", ""),
                 formato_salida=data.get("formato_salida", ""),
                 prioridad=data.get("prioridad", "Media"),
+                payload_json=json.dumps(data, ensure_ascii=False),
                 prompt_generado=prompt,
             )
         else:
             self.current_task.prompt_generado = prompt
+            if not self.current_task.payload_json:
+                self.current_task.payload_json = json.dumps(self._collect_form_data(), ensure_ascii=False)
 
         future = self.executor.submit(guardar_tarea, self.current_task)
         self.root.after(40, lambda: self._poll_future(future, "Tarea guardada correctamente."))
@@ -1505,6 +1523,7 @@ class PromptEngineUI:
             restricciones=source.restricciones,
             formato_salida=source.formato_salida,
             prioridad=source.prioridad,
+            payload_json=source.payload_json,
             prompt_generado=source.prompt_generado,
         )
         self.current_task = clone
@@ -1518,6 +1537,37 @@ class PromptEngineUI:
             self.contexto_var.set(clone.contexto)
         if clone.area:
             self.template_var.set(clone.area)
+
+        payload: dict[str, object] | None = None
+        if clone.payload_json:
+            try:
+                loaded = json.loads(clone.payload_json)
+                if isinstance(loaded, dict):
+                    payload = loaded
+            except json.JSONDecodeError:
+                payload = None
+
+        if payload is not None:
+            self._on_profile_change()
+            self._on_context_change()
+            self._on_template_changed()
+
+            for field, _label in BASE_FIELDS:
+                widget = self.base_widgets.get(field)
+                if widget is not None:
+                    self._write_widget(widget, payload.get(field, ""))
+
+            for key, widget in self.template_widgets.items():
+                self._write_widget(widget, payload.get(key, ""))
+            for key, widget in self.profile_extra_widgets.items():
+                self._write_widget(widget, payload.get(key, ""))
+            for key, widget in self.context_extra_widgets.items():
+                self._write_widget(widget, payload.get(key, ""))
+
+            messagebox.showinfo("Clonar tarea", "Tarea clonada y formulario rehidratado. Puedes editar y guardar.")
+            return
+
+        if clone.area:
             self._on_template_changed()
 
         messagebox.showinfo("Clonar tarea", "Tarea clonada en memoria. Puedes editar y guardar.")

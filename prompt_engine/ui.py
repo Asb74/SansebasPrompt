@@ -408,10 +408,26 @@ class ContextEditorDialog(tk.Toplevel):
         super().__init__(master)
         _set_app_icon(self)
         self.title("Contexto")
-        self.geometry("560x460")
+        self.geometry("560x560")
         self.transient(master)
         self.grab_set()
         self.result: dict | None = None
+        initial = dict(context or {})
+        extras_fields = initial.get("extras_fields")
+        if isinstance(extras_fields, list):
+            self.extras_fields: list[dict[str, str]] = [
+                {
+                    "key": str(item.get("key", "")).strip(),
+                    "label": str(item.get("label", "")).strip(),
+                    "help": str(item.get("help", "")).strip(),
+                    "example": str(item.get("example", "")).strip(),
+                    "default": str(item.get("default", "")).strip(),
+                }
+                for item in extras_fields
+                if isinstance(item, dict) and str(item.get("key", "")).strip()
+            ]
+        else:
+            self.extras_fields = []
 
         self.fields: dict[str, tk.Widget] = {}
         form = ttk.Frame(self, padding=12)
@@ -424,12 +440,11 @@ class ContextEditorDialog(tk.Toplevel):
             ("enfoque", "Enfoque (una por línea)", True),
             ("no_hacer", "No hacer (una por línea)", True),
         ]
-        initial = dict(context or {})
 
         for idx, (key, label, multiline) in enumerate(field_defs):
             ttk.Label(form, text=label).grid(row=idx, column=0, sticky="nw", pady=4, padx=(0, 8))
             if multiline:
-                widget: tk.Widget = ScrolledText(form, height=5, wrap="word")
+                widget: tk.Widget = ScrolledText(form, height=4, wrap="word")
                 value = initial.get(key, [])
                 if isinstance(value, list):
                     widget.insert("1.0", "\n".join(str(item) for item in value))
@@ -441,10 +456,124 @@ class ContextEditorDialog(tk.Toplevel):
             widget.grid(row=idx, column=1, sticky="ew", pady=4)
             self.fields[key] = widget
 
+        extras_row = len(field_defs)
+        extras_frame = ttk.LabelFrame(form, text="Campos personalizados")
+        extras_frame.grid(row=extras_row, column=0, columnspan=2, sticky="nsew", pady=(10, 0))
+        extras_frame.columnconfigure(0, weight=1)
+        extras_frame.rowconfigure(0, weight=1)
+        form.rowconfigure(extras_row, weight=1)
+
+        self.extras_listbox = tk.Listbox(extras_frame, height=7)
+        self.extras_listbox.grid(row=0, column=0, sticky="nsew", padx=(8, 4), pady=8)
+
+        extras_buttons = ttk.Frame(extras_frame)
+        extras_buttons.grid(row=0, column=1, sticky="ns", padx=(4, 8), pady=8)
+        ttk.Button(extras_buttons, text="Añadir", command=self._add_extra).pack(fill="x", pady=(0, 6))
+        ttk.Button(extras_buttons, text="Editar", command=self._edit_extra).pack(fill="x", pady=6)
+        ttk.Button(extras_buttons, text="Eliminar", command=self._delete_extra).pack(fill="x", pady=(6, 0))
+        self._refresh_extras()
+
         actions = ttk.Frame(form)
-        actions.grid(row=len(field_defs), column=0, columnspan=2, sticky="e", pady=(12, 0))
+        actions.grid(row=extras_row + 1, column=0, columnspan=2, sticky="e", pady=(12, 0))
         ttk.Button(actions, text="Cancelar", command=self.destroy).pack(side="right", padx=(6, 0))
         ttk.Button(actions, text="Guardar", command=self._save).pack(side="right")
+
+    def _refresh_extras(self) -> None:
+        self.extras_listbox.delete(0, tk.END)
+        for item in self.extras_fields:
+            label = item.get("label") or item.get("key", "")
+            self.extras_listbox.insert(tk.END, f"{label} ({item.get('key', '')})")
+
+    def _selected_extra_index(self) -> int | None:
+        selection = self.extras_listbox.curselection()
+        if not selection:
+            return None
+        return int(selection[0])
+
+    def _extra_editor(self, title: str, initial: dict[str, str] | None = None) -> dict[str, str] | None:
+        initial = initial or {}
+        dialog = tk.Toplevel(self)
+        _set_app_icon(dialog)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+
+        vars_map = {
+            "key": tk.StringVar(value=initial.get("key", "")),
+            "label": tk.StringVar(value=initial.get("label", "")),
+            "help": tk.StringVar(value=initial.get("help", "")),
+            "example": tk.StringVar(value=initial.get("example", "")),
+            "default": tk.StringVar(value=initial.get("default", "")),
+        }
+
+        rows = [
+            ("key", "Clave técnica"),
+            ("label", "Etiqueta"),
+            ("help", "Descripción"),
+            ("example", "Ejemplo"),
+            ("default", "Valor por defecto"),
+        ]
+
+        for row, (key, label) in enumerate(rows):
+            ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
+            ttk.Entry(frame, textvariable=vars_map[key]).grid(row=row, column=1, sticky="ew", pady=4)
+
+        result: dict[str, str] = {}
+
+        def _confirm() -> None:
+            key = vars_map["key"].get().strip()
+            if not key:
+                messagebox.showwarning("Campos personalizados", "La clave técnica es obligatoria.", parent=dialog)
+                return
+            result.update({name: var.get().strip() for name, var in vars_map.items()})
+            dialog.destroy()
+
+        actions = ttk.Frame(frame)
+        actions.grid(row=len(rows), column=0, columnspan=2, sticky="e", pady=(10, 0))
+        ttk.Button(actions, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Guardar", command=_confirm).pack(side="right")
+
+        dialog.wait_window()
+        return result or None
+
+    def _add_extra(self) -> None:
+        edited = self._extra_editor("Añadir campo")
+        if not edited:
+            return
+        key = edited.get("key", "")
+        if any(item.get("key") == key for item in self.extras_fields):
+            messagebox.showwarning("Campos personalizados", "La clave ya existe.", parent=self)
+            return
+        self.extras_fields.append(edited)
+        self._refresh_extras()
+
+    def _edit_extra(self) -> None:
+        idx = self._selected_extra_index()
+        if idx is None:
+            messagebox.showinfo("Campos personalizados", "Selecciona un campo para editar.", parent=self)
+            return
+        edited = self._extra_editor("Editar campo", initial=self.extras_fields[idx])
+        if not edited:
+            return
+        new_key = edited.get("key", "")
+        if any(i != idx and item.get("key") == new_key for i, item in enumerate(self.extras_fields)):
+            messagebox.showwarning("Campos personalizados", "La clave ya existe.", parent=self)
+            return
+        self.extras_fields[idx] = edited
+        self._refresh_extras()
+
+    def _delete_extra(self) -> None:
+        idx = self._selected_extra_index()
+        if idx is None:
+            messagebox.showinfo("Campos personalizados", "Selecciona un campo para eliminar.", parent=self)
+            return
+        self.extras_fields.pop(idx)
+        self._refresh_extras()
 
     @staticmethod
     def _read(widget: tk.Widget) -> str:
@@ -463,6 +592,7 @@ class ContextEditorDialog(tk.Toplevel):
             return
         payload["enfoque"] = self._split_lines(payload.get("enfoque", ""))
         payload["no_hacer"] = self._split_lines(payload.get("no_hacer", ""))
+        payload["extras_fields"] = list(self.extras_fields)
         self.result = payload
         self.destroy()
 
@@ -605,10 +735,13 @@ class PromptEngineUI:
         self.contexto_var = tk.StringVar()
         self.template_var = tk.StringVar()
         self.perfil_activo: dict | None = None
+        self.contexto_activo: dict | None = None
 
         self.base_widgets: dict[str, tk.Widget | DictationField] = {}
         self.profile_extra_widgets: dict[str, ttk.Entry] = {}
         self.profile_extra_meta: dict[str, dict[str, str]] = {}
+        self.context_extra_widgets: dict[str, ttk.Entry] = {}
+        self.context_extra_meta: dict[str, dict[str, str]] = {}
         self.template_widgets: dict[str, ttk.Entry] = {}
         self.attachment_paths: list[Path] = []
 
@@ -683,6 +816,7 @@ class PromptEngineUI:
         ttk.Label(form_inner, text="Contexto").grid(row=1, column=0, sticky="w", pady=4)
         self.contexto_combo = ttk.Combobox(form_inner, textvariable=self.contexto_var, state="readonly")
         self.contexto_combo.grid(row=1, column=1, sticky="ew", pady=4)
+        self.contexto_combo.bind("<<ComboboxSelected>>", self._on_context_change)
 
         ttk.Label(form_inner, text="Plantilla").grid(row=2, column=0, sticky="w", pady=4)
         self.template_combo = ttk.Combobox(form_inner, textvariable=self.template_var, state="readonly")
@@ -710,8 +844,12 @@ class PromptEngineUI:
         self.profile_extras_frame.grid(row=98, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.profile_extras_frame.columnconfigure(1, weight=1)
 
+        self.context_extras_frame = ttk.LabelFrame(form_inner, text="Campos personalizados de contexto", padding=8)
+        self.context_extras_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.context_extras_frame.columnconfigure(1, weight=1)
+
         self.template_fields_frame = ttk.LabelFrame(form_inner, text="Campos de plantilla", padding=8)
-        self.template_fields_frame.grid(row=99, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.template_fields_frame.grid(row=100, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         self.template_fields_frame.columnconfigure(1, weight=1)
 
         right = ttk.LabelFrame(main_paned, text="Panel contextual dinámico", padding=10)
@@ -819,10 +957,16 @@ class PromptEngineUI:
             help_text, sample = base_help
         else:
             help_text, sample = self._template_help(field)
-            profile_meta = self.profile_extra_meta.get(field, {})
-            if not help_text and profile_meta:
-                help_text = profile_meta.get("help", "")
-                sample = profile_meta.get("example", "")
+            if not help_text:
+                profile_meta = self.profile_extra_meta.get(field, {})
+                if profile_meta:
+                    help_text = profile_meta.get("help", "")
+                    sample = profile_meta.get("example", "")
+                else:
+                    context_meta = self.context_extra_meta.get(field, {})
+                    if context_meta:
+                        help_text = context_meta.get("help", "")
+                        sample = context_meta.get("example", "")
 
         self.context_title.configure(text=f"Campo activo: {field}")
         self.context_examples_title.configure(text=f"Ejemplos ({tpl.get('nombre', 'plantilla')})")
@@ -845,6 +989,10 @@ class PromptEngineUI:
     def _on_profile_change(self, _event=None) -> None:
         self.perfil_activo = self._selected_item(self.perfiles, self.perfil_var.get())
         self._render_profile_extras()
+
+    def _on_context_change(self, _event=None) -> None:
+        self.contexto_activo = self._selected_item(self.contextos, self.contexto_var.get())
+        self._render_context_extras()
 
     def _render_profile_extras(self) -> None:
         for widget in self.profile_extras_frame.winfo_children():
@@ -881,6 +1029,41 @@ class PromptEngineUI:
             self.profile_extra_widgets[key] = entry
             row_index += 1
 
+    def _render_context_extras(self) -> None:
+        for widget in self.context_extras_frame.winfo_children():
+            widget.destroy()
+        self.context_extra_widgets.clear()
+        self.context_extra_meta.clear()
+
+        extras_fields = []
+        if isinstance(self.contexto_activo, dict):
+            extras_fields = self.contexto_activo.get("extras_fields", [])
+        if not isinstance(extras_fields, list):
+            extras_fields = []
+
+        row_index = 0
+        for field in extras_fields:
+            if not isinstance(field, dict):
+                continue
+            key = str(field.get("key", "")).strip()
+            if not key:
+                continue
+            label = str(field.get("label", "")).strip() or key
+            default = str(field.get("default", "")).strip()
+            self.context_extra_meta[key] = {
+                "help": str(field.get("help", "")).strip(),
+                "example": str(field.get("example", "")).strip(),
+            }
+
+            ttk.Label(self.context_extras_frame, text=label).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 8))
+            entry = ttk.Entry(self.context_extras_frame)
+            if default:
+                entry.insert(0, default)
+            entry.grid(row=row_index, column=1, sticky="ew", pady=4)
+            entry.bind("<FocusIn>", lambda _e, f=key: self._update_context_panel(f))
+            self.context_extra_widgets[key] = entry
+            row_index += 1
+
     def _render_template_fields(self) -> None:
         for widget in self.template_fields_frame.winfo_children():
             widget.destroy()
@@ -912,6 +1095,7 @@ class PromptEngineUI:
         self._on_profile_change()
         if context_names and self.contexto_var.get() not in context_names:
             self.contexto_var.set(context_names[0])
+        self._on_context_change()
         if template_names:
             if self.template_var.get() not in template_names:
                 default = "gestion" if "gestion" in template_names else template_names[0]
@@ -941,6 +1125,8 @@ class PromptEngineUI:
         for field, entry in self.template_widgets.items():
             data[field] = entry.get().strip()
         for field, entry in self.profile_extra_widgets.items():
+            data[field] = entry.get().strip()
+        for field, entry in self.context_extra_widgets.items():
             data[field] = entry.get().strip()
 
         data["entradas"] = data.get("situacion", "")

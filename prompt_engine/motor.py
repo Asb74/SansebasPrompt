@@ -67,6 +67,25 @@ def generar_prompt(
     if extras_filtrados:
         payload["_perfil_extras"] = extras_filtrados
 
+    contexto_extras_filtrados: dict[str, str] = {}
+    contexto_extras_fields = contexto.get("extras_fields")
+    if isinstance(contexto_extras_fields, list):
+        for field in contexto_extras_fields:
+            if not isinstance(field, dict):
+                continue
+            key = str(field.get("key", "")).strip()
+            if not key:
+                continue
+            value = datos_tarea.get(key)
+            if value is None:
+                continue
+            value_text = str(value).strip()
+            if value_text:
+                contexto_extras_filtrados[key] = value_text
+
+    if contexto_extras_filtrados:
+        payload["_contexto_extras"] = contexto_extras_filtrados
+
     area = _normalizar_area(datos_tarea.get("area", ""))
     if area == "it":
         payload.update(

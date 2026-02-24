@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
@@ -12,6 +13,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from .widgets import DictationField
 
+from .app_paths import ensure_user_dirs, get_db_path, get_templates_dir
 from .attachments import validar_tipo_archivo
 from .database import init_db
 from .motor import generar_prompt
@@ -56,6 +58,27 @@ BASE_HELP = {
 def resource_path(relative_path: str) -> Path:
     base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
     return base_path / relative_path
+
+
+def ensure_bootstrap_assets() -> None:
+    """Prepara DB y plantillas per-user en primer arranque."""
+    ensure_user_dirs()
+
+    db_path = get_db_path()
+    if not db_path.exists():
+        seed_db_path = resource_path("seed/prom9_seed.sqlite")
+        if seed_db_path.exists():
+            shutil.copy2(seed_db_path, db_path)
+
+    templates_dir = get_templates_dir()
+    has_user_templates = any(templates_dir.glob("*.py"))
+    if not has_user_templates:
+        bundled_templates_dir = resource_path("prompt_engine/plantillas")
+        if bundled_templates_dir.exists():
+            for source_tpl in bundled_templates_dir.glob("*.py"):
+                shutil.copy2(source_tpl, templates_dir / source_tpl.name)
+
+    init_db()
 
 
 def _set_app_icon(window: tk.Tk | tk.Toplevel) -> None:
@@ -879,6 +902,7 @@ class PromptEngineUI:
         self.root.title("Prompt Engine PROM-9™")
         self.root.geometry("1280x860")
         _set_app_icon(self.root)
+        ensure_bootstrap_assets()
 
         self.executor = ThreadPoolExecutor(max_workers=2)
         self.voice_input: VoiceInput | None = None
@@ -1866,7 +1890,7 @@ class PromptEngineUI:
             messagebox.showerror("Contextos", "No se pudo eliminar")
 
     def _template_path(self, template_name: str) -> Path:
-        return Path(__file__).resolve().parent / "plantillas" / f"{template_name}.py"
+        return get_templates_dir() / f"{template_name}.py"
 
     def new_template(self) -> None:
         template_name = simpledialog.askstring("Nueva Plantilla", "Nombre de plantilla (sin .py):", parent=self.root)
@@ -1984,9 +2008,6 @@ class PromptEngineUI:
 
 
 def run_ui() -> None:
-    print(">>> ANTES DE LLAMAR A init_db()")
-    init_db()
-    print(">>> DESPUÉS DE LLAMAR A init_db()")
     root = tk.Tk()
     style = ttk.Style(root)
     if "vista" in style.theme_names():

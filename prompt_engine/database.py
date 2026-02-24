@@ -18,7 +18,6 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Inicializa el esquema SQLite si aún no existe."""
-    print(">>> INIT_DB EJECUTADO")
     schema = """
     CREATE TABLE IF NOT EXISTS perfiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,7 +120,24 @@ def init_db() -> None:
             row["name"]
             for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
         }
+        if "rol_contextual" not in columnas_contextos:
+            conn.execute("ALTER TABLE contextos ADD COLUMN rol_contextual TEXT;")
+        if "enfoque" not in columnas_contextos:
+            conn.execute("ALTER TABLE contextos ADD COLUMN enfoque TEXT;")
+        if "no_hacer" not in columnas_contextos:
+            conn.execute("ALTER TABLE contextos ADD COLUMN no_hacer TEXT;")
         if "extras_fields" not in columnas_contextos:
-            print(">>> Añadiendo columna 'extras_fields' a contextos")
             conn.execute("ALTER TABLE contextos ADD COLUMN extras_fields TEXT;")
-            print(">>> Columna 'extras_fields' añadida correctamente en contextos")
+
+        if "foco" in columnas_contextos and "rol_contextual" in {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(contextos)").fetchall()
+        }:
+            conn.execute(
+                """
+                UPDATE contextos
+                SET rol_contextual = foco
+                WHERE (rol_contextual IS NULL OR rol_contextual = '')
+                  AND foco IS NOT NULL
+                """
+            )

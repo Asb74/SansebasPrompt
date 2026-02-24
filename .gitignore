@@ -1,2 +1,9 @@
 __pycache__/
 *.pyc
+build/
+dist/
+*.spec
+*.exe
+*.sqlite
+*.db
+prompt_engine/KeySecret.txt

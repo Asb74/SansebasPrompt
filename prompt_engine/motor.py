@@ -23,6 +23,18 @@ DIRECTRICES_TECNICAS_IT = """### Directrices obligatorias de análisis técnico
 - No incluir elogios ni frases motivacionales.
 """
 
+IT_TEMPLATE_KEYS = [
+    "tipo_sistema",
+    "entorno_ejecucion",
+    "datos_persistencia",
+    "requisitos_funcionales",
+    "requisitos_no_funcionales",
+    "criterios_aceptacion",
+    "entregables",
+    "riesgos_y_mitigacion",
+    "plan_pruebas",
+]
+
 
 def _normalizar_area(area: str) -> str:
     """Normaliza el área para facilitar el enrutamiento de plantilla."""
@@ -94,6 +106,10 @@ def generar_prompt(
                 "nivel_tecnico": datos_tarea.get("nivel_tecnico", "Senior"),
             }
         )
+        for key in IT_TEMPLATE_KEYS:
+            value = datos_tarea.get(key)
+            if value is not None and str(value).strip():
+                payload[key] = str(value).strip()
         prompt = render_it(payload)
     elif area == "ventas":
         payload.update(

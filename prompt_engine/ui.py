@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import csv
 import shutil
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
@@ -842,12 +843,16 @@ class AsistenteIADialog(tk.Toplevel):
         self.generated_data: dict[str, object] | None = None
         self.diagnosis_data: dict[str, object] | None = None
         self._future = None
+        self._future_session_id: str | None = None
 
         self.kind_var = tk.StringVar(value="Perfil")
         self.name_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Listo")
         self.depth_var = tk.StringVar(value="Normal")
         self.memory: dict[str, object] = {}
+        self._session_id = self._new_session_id()
+        self._session_fingerprint: tuple[str, str] = (self.kind_var.get().strip(), self.name_var.get().strip())
+        self.use_active_master = False
 
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
@@ -865,7 +870,10 @@ class AsistenteIADialog(tk.Toplevel):
         self.kind_combo.bind("<<ComboboxSelected>>", self._on_kind_changed)
 
         ttk.Label(frame, text="Nombre").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
-        ttk.Entry(frame, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", pady=4)
+        self.name_entry = ttk.Entry(frame, textvariable=self.name_var)
+        self.name_entry.grid(row=1, column=1, sticky="ew", pady=4)
+        self.name_entry.bind("<FocusOut>", self._on_name_changed)
+        self.name_entry.bind("<Return>", self._on_name_changed)
 
         ttk.Label(frame, text="Descripción").grid(row=2, column=0, sticky="nw", padx=(0, 8), pady=4)
         self.description_text = DictationField(frame, voice_input=ui.voice_input, multiline=True, height=9)
@@ -1021,7 +1029,58 @@ class AsistenteIADialog(tk.Toplevel):
     def _depth_settings(self) -> dict[str, int]:
         return self._DEPTH_CONFIG.get(self.depth_var.get(), self._DEPTH_CONFIG["Normal"])
 
+    @staticmethod
+    def _new_session_id() -> str:
+        return uuid.uuid4().hex
+
+    def _update_session_fingerprint(self) -> None:
+        self._session_fingerprint = (self.kind_var.get().strip(), self.name_var.get().strip())
+
+    def _confirm_new_session_if_needed(self) -> bool:
+        current = (self.kind_var.get().strip(), self.name_var.get().strip())
+        if current == self._session_fingerprint:
+            return False
+        start_new = messagebox.askyesno(
+            "Asistente IA",
+            "Has cambiado el Tipo o el Nombre del maestro.\n\n"
+            "¿Quieres iniciar una sesión NUEVA para evitar mezclar datos?\n\n"
+            "Sí = Nuevo (se limpia memoria/preguntas/respuestas)\n"
+            "No = Continuar (mantiene memoria actual).",
+            parent=self,
+        )
+        if start_new:
+            self._reset_session_state()
+        else:
+            self._update_session_fingerprint()
+        return start_new
+
+    def _reset_session_state(self) -> None:
+        self._session_id = self._new_session_id()
+        self._future_session_id = None
+        self.use_active_master = False
+        self.memory = {}
+        self.diagnosis_data = None
+        self.generated_data = None
+        self._clear_text_widget(self.questions_text, readonly=True)
+        self._clear_text_widget(self.answers_text)
+        self._set_preview(None)
+        self._render_memory()
+        self.status_var.set("Listo")
+        self.generate_master_button.configure(state="disabled")
+        self.refine_button.configure(state="disabled")
+        self.diagnose_button.configure(state="normal")
+        self._update_session_fingerprint()
+
     def _active_ai_context(self) -> dict[str, object]:
+        if not self.use_active_master:
+            return {
+                "perfil_activo": {},
+                "contexto_activo": {},
+                "plantilla_seleccionada": {},
+            }
+        return self._selected_ai_context()
+
+    def _selected_ai_context(self) -> dict[str, object]:
         perfil = self.ui._selected_item(self.ui.perfiles, self.ui.perfil_var.get())
         contexto = self.ui._selected_item(self.ui.contextos, self.ui.contexto_var.get())
         plantilla = self.ui._selected_item(self.ui.plantillas, self.ui.template_var.get())
@@ -1032,7 +1091,8 @@ class AsistenteIADialog(tk.Toplevel):
         }
 
     def _use_selected_master_data(self) -> None:
-        context = self._active_ai_context()
+        self.use_active_master = True
+        context = self._selected_ai_context()
         kind = self._kind_key()
         if kind == "perfil":
             perfil = context.get("perfil_activo") if isinstance(context.get("perfil_activo"), dict) else {}
@@ -1058,13 +1118,10 @@ class AsistenteIADialog(tk.Toplevel):
         self._render_memory()
 
     def _on_kind_changed(self, _event: tk.Event | None = None) -> None:
-        self._clear_text_widget(self.questions_text, readonly=True)
-        self._clear_text_widget(self.answers_text)
-        self._set_preview(None)
-        self.generated_data = None
-        self.diagnosis_data = None
-        self.status_var.set("Listo")
-        self.generate_master_button.configure(state="disabled")
+        self._confirm_new_session_if_needed()
+
+    def _on_name_changed(self, _event: tk.Event | None = None) -> None:
+        self._confirm_new_session_if_needed()
 
     def _set_questions(
         self,
@@ -1143,6 +1200,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.diagnosis_data = None
         if reset_questions:
             self._clear_text_widget(self.questions_text, readonly=True)
+            self._clear_text_widget(self.answers_text)
         self._set_preview(None)
         self.diagnose_button.configure(state="disabled")
         self.generate_master_button.configure(state="disabled")
@@ -1160,6 +1218,7 @@ class AsistenteIADialog(tk.Toplevel):
             exclude_keys,
             focus,
         )
+        self._future_session_id = self._session_id
         self.after(80, self._poll_diagnosis)
 
     def _on_diagnose(self) -> None:
@@ -1195,6 +1254,7 @@ class AsistenteIADialog(tk.Toplevel):
             answers,
             self._active_ai_context(),
         )
+        self._future_session_id = self._session_id
         self.after(80, self._poll_generation)
 
     def _poll_diagnosis(self) -> None:
@@ -1204,8 +1264,12 @@ class AsistenteIADialog(tk.Toplevel):
             self.after(80, self._poll_diagnosis)
             return
 
+        session_matches = self._future_session_id == self._session_id
+
         try:
             result = self._future.result()
+            if not session_matches:
+                return
             if not isinstance(result, dict):
                 raise RuntimeError("El diagnóstico devolvió un formato inválido.")
             self.diagnosis_data = result
@@ -1229,6 +1293,7 @@ class AsistenteIADialog(tk.Toplevel):
             if isinstance(draft, dict):
                 self.generated_data = draft
                 self.name_var.set(str(draft.get("nombre", self.name_var.get())).strip())
+                self._update_session_fingerprint()
                 self._set_preview(draft)
 
             self.generate_master_button.configure(state="normal")
@@ -1243,9 +1308,11 @@ class AsistenteIADialog(tk.Toplevel):
             self.generate_master_button.configure(state="normal" if isinstance(self.diagnosis_data, dict) else "disabled")
             messagebox.showerror("Asistente IA", f"Error inesperado al diagnosticar: {exc}", parent=self)
         finally:
-            self.diagnose_button.configure(state="normal")
-            self.refine_button.configure(state="normal")
+            if session_matches:
+                self.diagnose_button.configure(state="normal")
+                self.refine_button.configure(state="normal")
             self._future = None
+            self._future_session_id = None
 
     def _poll_generation(self) -> None:
         if self._future is None:
@@ -1254,12 +1321,17 @@ class AsistenteIADialog(tk.Toplevel):
             self.after(80, self._poll_generation)
             return
 
+        session_matches = self._future_session_id == self._session_id
+
         try:
             result = self._future.result()
+            if not session_matches:
+                return
             if not isinstance(result, dict):
                 raise RuntimeError("La generación devolvió un formato inválido.")
             self.generated_data = result
             self.name_var.set(str(result.get("nombre", self.name_var.get())).strip())
+            self._update_session_fingerprint()
             self._set_preview(self.generated_data)
             self.status_var.set("Generación completada")
         except RuntimeError as exc:
@@ -1269,10 +1341,12 @@ class AsistenteIADialog(tk.Toplevel):
             self.status_var.set("Error")
             messagebox.showerror("Asistente IA", f"Error inesperado al generar: {exc}", parent=self)
         finally:
-            self.diagnose_button.configure(state="normal")
-            self.refine_button.configure(state="normal")
-            self.generate_master_button.configure(state="normal")
+            if session_matches:
+                self.diagnose_button.configure(state="normal")
+                self.refine_button.configure(state="normal")
+                self.generate_master_button.configure(state="normal")
             self._future = None
+            self._future_session_id = None
 
     def _on_apply(self) -> None:
         if not self.generated_data:
@@ -1282,6 +1356,7 @@ class AsistenteIADialog(tk.Toplevel):
         if applied:
             self.generated_data = applied
             self.name_var.set(str(applied.get("nombre", self.name_var.get())).strip())
+            self._update_session_fingerprint()
             self._set_preview(self.generated_data)
 
     def _on_save(self) -> None:

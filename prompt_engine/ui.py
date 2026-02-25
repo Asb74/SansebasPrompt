@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,6 +21,7 @@ from .motor import generar_prompt
 from .pdf_export import export_prompt_to_pdf
 from .schemas import Tarea, generate_task_id, task_id_to_human
 from .storage_sqlite import (
+    insert_perfil,
     delete_contexto,
     delete_perfil,
     delete_plantilla,
@@ -32,6 +34,7 @@ from .storage_sqlite import (
     insert_contexto,
     listar_tareas,
     update_plantilla,
+    update_perfil,
     update_contexto,
     upsert_plantilla,
 )
@@ -964,6 +967,12 @@ class PromptEngineUI:
         archivo.add_separator()
         archivo.add_command(label="Salir", command=self._on_close)
         menubar.add_cascade(label="Archivo", menu=archivo)
+
+        herramientas = tk.Menu(menubar, tearoff=False)
+        herramientas.add_command(label="Importar…", command=self.importar_maestros_csv)
+        herramientas.add_command(label="Exportar…", command=self.exportar_maestros_csv)
+        menubar.add_cascade(label="Herramientas", menu=herramientas)
+
         self.root.config(menu=menubar)
 
 
@@ -1782,6 +1791,290 @@ class PromptEngineUI:
 
         self.root.wait_window(modal)
         return result["name"]
+
+    def _select_master_type(self, title: str) -> str | None:
+        options = ["Perfil", "Contexto", "Plantilla"]
+        selected = tk.StringVar(value=options[0])
+        modal = tk.Toplevel(self.root)
+        _set_app_icon(modal)
+        modal.title(title)
+        modal.transient(self.root)
+        modal.grab_set()
+
+        body = ttk.Frame(modal, padding=12)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Selecciona el tipo de maestro").pack(anchor="w")
+        combo = ttk.Combobox(body, values=options, textvariable=selected, state="readonly")
+        combo.pack(fill="x", pady=(6, 10))
+
+        result = {"kind": None}
+
+        def accept() -> None:
+            result["kind"] = selected.get().strip()
+            modal.destroy()
+
+        actions = ttk.Frame(body)
+        actions.pack(fill="x")
+        ttk.Button(actions, text="Cancelar", command=modal.destroy).pack(side="right", padx=(6, 0))
+        ttk.Button(actions, text="Aceptar", command=accept).pack(side="right")
+
+        self.root.wait_window(modal)
+        return result["kind"]
+
+    def _load_json_field(self, raw_value: str, default_value: list | dict) -> list | dict:
+        clean_value = (raw_value or "").strip()
+        if not clean_value:
+            return default_value
+        parsed = json.loads(clean_value)
+        if isinstance(default_value, list):
+            if isinstance(parsed, list):
+                return parsed
+            raise ValueError("Se esperaba una lista JSON")
+        if isinstance(parsed, dict):
+            return parsed
+        raise ValueError("Se esperaba un objeto JSON")
+
+    def importar_maestros_csv(self) -> None:
+        selected_type = self._select_master_type("Importar maestros")
+        if not selected_type:
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="Selecciona archivo CSV",
+            filetypes=[("CSV", "*.csv"), ("Todos", "*.*")],
+        )
+        if not file_path:
+            return
+
+        master_configs = {
+            "Perfil": {
+                "required": [
+                    "nombre",
+                    "rol",
+                    "rol_base",
+                    "empresa",
+                    "ubicacion",
+                    "herramientas_json",
+                    "estilo",
+                    "nivel_tecnico",
+                    "prioridades_json",
+                    "extras_json",
+                    "extras_fields_json",
+                ],
+                "json_fields": {
+                    "herramientas_json": [],
+                    "prioridades_json": [],
+                    "extras_json": {},
+                    "extras_fields_json": [],
+                },
+            },
+            "Contexto": {
+                "required": ["nombre", "rol_contextual", "enfoque_json", "no_hacer_json", "extras_fields_json"],
+                "json_fields": {
+                    "enfoque_json": [],
+                    "no_hacer_json": [],
+                    "extras_fields_json": [],
+                },
+            },
+            "Plantilla": {
+                "required": ["nombre", "label", "fields_json", "ejemplos_json"],
+                "json_fields": {
+                    "fields_json": [],
+                    "ejemplos_json": [],
+                },
+            },
+        }
+
+        config = master_configs[selected_type]
+        imported = 0
+        updated = 0
+        errors: list[str] = []
+
+        try:
+            with open(file_path, encoding="utf-8-sig", newline="") as csv_file:
+                reader = csv.DictReader(csv_file)
+                fieldnames = reader.fieldnames or []
+                missing_columns = [column for column in config["required"] if column not in fieldnames]
+                if missing_columns:
+                    messagebox.showerror(
+                        "Importar maestros",
+                        "Faltan columnas obligatorias: " + ", ".join(missing_columns),
+                    )
+                    return
+
+                for row_index, row in enumerate(reader, start=2):
+                    try:
+                        nombre = (row.get("nombre") or "").strip()
+                        if not nombre:
+                            raise ValueError("El campo 'nombre' es obligatorio")
+
+                        if selected_type == "Perfil":
+                            payload = {
+                                "nombre": nombre,
+                                "rol": (row.get("rol") or "").strip(),
+                                "rol_base": (row.get("rol_base") or "").strip(),
+                                "empresa": (row.get("empresa") or "").strip(),
+                                "ubicacion": (row.get("ubicacion") or "").strip(),
+                                "herramientas": self._load_json_field(
+                                    row.get("herramientas_json", ""),
+                                    config["json_fields"]["herramientas_json"],
+                                ),
+                                "estilo": (row.get("estilo") or "").strip(),
+                                "nivel_tecnico": (row.get("nivel_tecnico") or "").strip(),
+                                "prioridades": self._load_json_field(
+                                    row.get("prioridades_json", ""),
+                                    config["json_fields"]["prioridades_json"],
+                                ),
+                                "extras": self._load_json_field(
+                                    row.get("extras_json", ""),
+                                    config["json_fields"]["extras_json"],
+                                ),
+                                "extras_fields": self._load_json_field(
+                                    row.get("extras_fields_json", ""),
+                                    config["json_fields"]["extras_fields_json"],
+                                ),
+                            }
+                            if update_perfil(nombre, payload):
+                                updated += 1
+                            else:
+                                insert_perfil(payload)
+                                imported += 1
+
+                        elif selected_type == "Contexto":
+                            payload = {
+                                "nombre": nombre,
+                                "rol_contextual": (row.get("rol_contextual") or "").strip(),
+                                "enfoque": self._load_json_field(
+                                    row.get("enfoque_json", ""),
+                                    config["json_fields"]["enfoque_json"],
+                                ),
+                                "no_hacer": self._load_json_field(
+                                    row.get("no_hacer_json", ""),
+                                    config["json_fields"]["no_hacer_json"],
+                                ),
+                                "extras_fields": self._load_json_field(
+                                    row.get("extras_fields_json", ""),
+                                    config["json_fields"]["extras_fields_json"],
+                                ),
+                            }
+                            if update_contexto(nombre, payload):
+                                updated += 1
+                            else:
+                                insert_contexto(payload)
+                                imported += 1
+                        else:
+                            payload = {
+                                "nombre": nombre,
+                                "label": (row.get("label") or "").strip(),
+                                "fields": self._load_json_field(
+                                    row.get("fields_json", ""),
+                                    config["json_fields"]["fields_json"],
+                                ),
+                                "ejemplos": self._load_json_field(
+                                    row.get("ejemplos_json", ""),
+                                    config["json_fields"]["ejemplos_json"],
+                                ),
+                            }
+                            if update_plantilla(nombre, payload):
+                                updated += 1
+                            else:
+                                upsert_plantilla(payload)
+                                imported += 1
+                    except Exception as exc:
+                        errors.append(f"Fila {row_index}: {exc}")
+        except Exception as exc:
+            messagebox.showerror("Importar maestros", f"Error al leer el CSV: {exc}")
+            return
+
+        self._refresh_data_sources()
+        summary = [f"Importados: {imported}", f"Actualizados: {updated}", f"Errores: {len(errors)}"]
+        if errors:
+            summary.append("\nDetalle de errores:")
+            summary.extend(errors[:10])
+            if len(errors) > 10:
+                summary.append(f"... y {len(errors) - 10} más")
+        messagebox.showinfo("Importar maestros", "\n".join(summary))
+
+    def exportar_maestros_csv(self) -> None:
+        selected_type = self._select_master_type("Exportar maestros")
+        if not selected_type:
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Guardar CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv")],
+        )
+        if not file_path:
+            return
+
+        if selected_type == "Perfil":
+            records = get_perfiles()
+            fieldnames = [
+                "nombre",
+                "rol",
+                "rol_base",
+                "empresa",
+                "ubicacion",
+                "herramientas_json",
+                "estilo",
+                "nivel_tecnico",
+                "prioridades_json",
+                "extras_json",
+                "extras_fields_json",
+            ]
+            rows = [
+                {
+                    "nombre": item.get("nombre", ""),
+                    "rol": item.get("rol", ""),
+                    "rol_base": item.get("rol_base", item.get("rol", "")),
+                    "empresa": item.get("empresa", ""),
+                    "ubicacion": item.get("ubicacion", ""),
+                    "herramientas_json": json.dumps(item.get("herramientas", []), ensure_ascii=False),
+                    "estilo": item.get("estilo", ""),
+                    "nivel_tecnico": item.get("nivel_tecnico", ""),
+                    "prioridades_json": json.dumps(item.get("prioridades", []), ensure_ascii=False),
+                    "extras_json": json.dumps(item.get("extras", {}), ensure_ascii=False),
+                    "extras_fields_json": json.dumps(item.get("extras_fields", []), ensure_ascii=False),
+                }
+                for item in records
+            ]
+        elif selected_type == "Contexto":
+            records = get_contextos()
+            fieldnames = ["nombre", "rol_contextual", "enfoque_json", "no_hacer_json", "extras_fields_json"]
+            rows = [
+                {
+                    "nombre": item.get("nombre", ""),
+                    "rol_contextual": item.get("rol_contextual", ""),
+                    "enfoque_json": json.dumps(item.get("enfoque", []), ensure_ascii=False),
+                    "no_hacer_json": json.dumps(item.get("no_hacer", []), ensure_ascii=False),
+                    "extras_fields_json": json.dumps(item.get("extras_fields", []), ensure_ascii=False),
+                }
+                for item in records
+            ]
+        else:
+            records = get_plantillas()
+            fieldnames = ["nombre", "label", "fields_json", "ejemplos_json"]
+            rows = [
+                {
+                    "nombre": item.get("nombre", ""),
+                    "label": item.get("label", ""),
+                    "fields_json": json.dumps(item.get("fields", []), ensure_ascii=False),
+                    "ejemplos_json": json.dumps(item.get("ejemplos", []), ensure_ascii=False),
+                }
+                for item in records
+            ]
+
+        try:
+            with open(file_path, "w", encoding="utf-8", newline="") as csv_file:
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+        except Exception as exc:
+            messagebox.showerror("Exportar maestros", f"No se pudo exportar el CSV: {exc}")
+            return
+
+        messagebox.showinfo("Exportar maestros", f"Se exportaron {len(rows)} registros en:\n{file_path}")
 
     def new_profile(self) -> None:
         modal = ProfileEditorDialog(self.root)

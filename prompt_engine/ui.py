@@ -1821,11 +1821,21 @@ class PromptEngineUI:
         self.root.wait_window(modal)
         return result["kind"]
 
-    def _load_json_field(self, raw_value: str, default_value: list | dict) -> list | dict:
+    def _load_json_field(
+        self,
+        raw_value: str,
+        default_value: list | dict,
+        column_name: str | None = None,
+    ) -> list | dict:
         clean_value = (raw_value or "").strip()
         if not clean_value:
             return default_value
-        parsed = json.loads(clean_value)
+        try:
+            parsed = json.loads(clean_value)
+        except json.JSONDecodeError as exc:
+            if column_name:
+                raise ValueError(f"JSON inválido en columna {column_name}") from exc
+            raise ValueError("JSON inválido") from exc
         if isinstance(default_value, list):
             if isinstance(parsed, list):
                 return parsed
@@ -1918,20 +1928,24 @@ class PromptEngineUI:
                                 "herramientas": self._load_json_field(
                                     row.get("herramientas_json", ""),
                                     config["json_fields"]["herramientas_json"],
+                                    "herramientas_json",
                                 ),
                                 "estilo": (row.get("estilo") or "").strip(),
                                 "nivel_tecnico": (row.get("nivel_tecnico") or "").strip(),
                                 "prioridades": self._load_json_field(
                                     row.get("prioridades_json", ""),
                                     config["json_fields"]["prioridades_json"],
+                                    "prioridades_json",
                                 ),
                                 "extras": self._load_json_field(
                                     row.get("extras_json", ""),
                                     config["json_fields"]["extras_json"],
+                                    "extras_json",
                                 ),
                                 "extras_fields": self._load_json_field(
                                     row.get("extras_fields_json", ""),
                                     config["json_fields"]["extras_fields_json"],
+                                    "extras_fields_json",
                                 ),
                             }
                             if update_perfil(nombre, payload):
@@ -1947,14 +1961,17 @@ class PromptEngineUI:
                                 "enfoque": self._load_json_field(
                                     row.get("enfoque_json", ""),
                                     config["json_fields"]["enfoque_json"],
+                                    "enfoque_json",
                                 ),
                                 "no_hacer": self._load_json_field(
                                     row.get("no_hacer_json", ""),
                                     config["json_fields"]["no_hacer_json"],
+                                    "no_hacer_json",
                                 ),
                                 "extras_fields": self._load_json_field(
                                     row.get("extras_fields_json", ""),
                                     config["json_fields"]["extras_fields_json"],
+                                    "extras_fields_json",
                                 ),
                             }
                             if update_contexto(nombre, payload):
@@ -1969,10 +1986,12 @@ class PromptEngineUI:
                                 "fields": self._load_json_field(
                                     row.get("fields_json", ""),
                                     config["json_fields"]["fields_json"],
+                                    "fields_json",
                                 ),
                                 "ejemplos": self._load_json_field(
                                     row.get("ejemplos_json", ""),
                                     config["json_fields"]["ejemplos_json"],
+                                    "ejemplos_json",
                                 ),
                             }
                             if update_plantilla(nombre, payload):
@@ -1980,6 +1999,7 @@ class PromptEngineUI:
                             else:
                                 upsert_plantilla(payload)
                                 imported += 1
+                            self._ensure_template_py_exists(nombre)
                     except Exception as exc:
                         errors.append(f"Fila {row_index}: {exc}")
         except Exception as exc:
@@ -2066,7 +2086,7 @@ class PromptEngineUI:
             ]
 
         try:
-            with open(file_path, "w", encoding="utf-8", newline="") as csv_file:
+            with open(file_path, "w", encoding="utf-8-sig", newline="") as csv_file:
                 writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
                 writer.writeheader()
                 writer.writerows(rows)
@@ -2184,6 +2204,20 @@ class PromptEngineUI:
 
     def _template_path(self, template_name: str) -> Path:
         return get_templates_dir() / f"{template_name}.py"
+
+    def _ensure_template_py_exists(self, nombre: str) -> None:
+        path = get_templates_dir() / f"{nombre}.py"
+        if path.exists():
+            return
+        stub = (
+            '"""Plantilla personalizada PROM-9™."""\n\n'
+            "from __future__ import annotations\n\n"
+            "from typing import Dict\n\n"
+            "from .prom9_base import render_base\n\n\n"
+            "def render_custom(payload: Dict[str, str]) -> str:\n"
+            "    return render_base(payload)\n"
+        )
+        path.write_text(stub, encoding="utf-8")
 
     def new_template(self) -> None:
         template_name = simpledialog.askstring("Nueva Plantilla", "Nombre de plantilla (sin .py):", parent=self.root)

@@ -283,6 +283,47 @@ def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str, max_ques
     return normalized
 
 
+def _stringify_default_value(value: Any) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, list):
+        return "; ".join(_strip_text(item) for item in value if _strip_text(item))
+    if isinstance(value, dict):
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return _strip_text(value)
+    return _strip_text(value)
+
+
+def _apply_memory_defaults_to_extras_fields(
+    fields: list[dict[str, str]],
+    memory_sources: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    sources = memory_sources or []
+    merged: dict[str, Any] = {}
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key, value in source.items():
+            clean_key = _strip_text(key)
+            if clean_key and value not in (None, "", [], {}):
+                merged[clean_key] = value
+
+    applied: list[dict[str, str]] = []
+    for field in fields:
+        current = dict(field)
+        key = _strip_text(current.get("key"))
+        if key and key in merged:
+            as_default = _stringify_default_value(merged[key])
+            if as_default:
+                current["default"] = as_default
+                if not _strip_text(current.get("example")):
+                    current["example"] = as_default
+        applied.append(current)
+    return applied
+
+
 def _load_api_key() -> str:
     env_key = _strip_text(os.getenv("OPENAI_API_KEY"))
     if env_key:
@@ -358,9 +399,14 @@ def _diagnosis_system_prompt(
         "Devuelve SOLO JSON del esquema diagnosis; no markdown; no texto; no inventes; si falta info, pregunta. "
         "No inventes datos de identidad (empresa, ubicación, personas, clientes). "
         f"Genera como máximo {max_questions} preguntas en base_questions y 6 en extras_questions. "
-        "base_questions: para campos base críticos del maestro (rol_base/rol_contextual/label, etc). "
-        "extras_fields_sugeridos: entre 6 y 12 campos extra reutilizables y útiles. "
+        "base_questions: para completar el maestro BASE, no solo plantilla de campos. "
+        "Para perfil pregunta por rol_base, rol, empresa, ubicacion, herramientas, estilo, nivel_tecnico, prioridades. "
+        "Para contexto pregunta por rol_contextual, enfoque y no_hacer. "
+        "Para plantilla pregunta por label, fields y ejemplos. "
+        "extras_fields_sugeridos: entre 6 y 12 campos extra reutilizables y útiles para especialización del dominio. "
         "extras_questions: entre 3 y 6 preguntas para afinar esos extras. "
+        "Prohibido incluir como extras_fields keys de base como rol_base, rol, empresa, ubicacion, herramientas, "
+        "estilo, nivel_tecnico, prioridades, rol_contextual, enfoque, no_hacer, label, fields, ejemplos, base, extras. "
         "No preguntes por keys presentes en exclude_keys. "
         "base_questions = solo campos base críticos aún no cubiertos. "
         "extras_questions = solo extras útiles que NO estén ya cubiertos. "
@@ -397,10 +443,13 @@ def _clean_non_empty_map(payload: dict[str, Any] | None) -> dict[str, Any]:
 def _final_system_prompt(kind: str, name: str) -> str:
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
-        "Devuelve SOLO JSON maestro; usa answers; no inventes; "
+        "Devuelve SOLO JSON maestro completo; usa answers; no inventes; "
         "rellena primero campos base críticos, luego extras_fields útiles y luego el resto. "
         "Prioriza memoria+answers del usuario por encima de masters_activos si hay conflicto. "
         "No clones el maestro activo: genera uno actualizado a partir de la conversación. "
+        "masters_activos solo como referencia secundaria si NO hay conflicto con descripción/memoria/answers. "
+        "La coherencia de dominio manda: si la descripción es agronómica (p.ej. caqui), evita arrastrar stack IT "
+        "(Python, SQLite, Senior IT) salvo que el usuario lo indique explícitamente. "
         "lo que no se indique queda en '' o listas vacías; "
         "extras_fields incluir sugerencias útiles si el usuario no las definió. "
         "No markdown, no texto adicional. "
@@ -486,11 +535,17 @@ def generate_master_diagnosis(
             f"{json.dumps(clean_memory, ensure_ascii=False)}. "
             "No preguntes por keys presentes en exclude_keys. "
             f"exclude_keys: {json.dumps(clean_exclude_keys, ensure_ascii=False)}. "
-            "Maestros activos de la UI (perfil/contexto/plantilla seleccionada), para no reinventar datos: "
+            "Maestros activos de la UI (perfil/contexto/plantilla seleccionada), úsalos solo como referencia débil "
+            "si no contradicen la descripción ni la memoria confirmada: "
             f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
     )
-    return _normalize_diagnosis(normalized_kind, payload, normalized_name, safe_max_questions)
+    normalized = _normalize_diagnosis(normalized_kind, payload, normalized_name, safe_max_questions)
+    normalized["extras_fields_sugeridos"] = _apply_memory_defaults_to_extras_fields(
+        _as_fields_list(normalized.get("extras_fields_sugeridos")),
+        [clean_memory],
+    )
+    return normalized
 
 
 def generate_master_with_answers(
@@ -536,6 +591,11 @@ def generate_master_with_answers(
         ),
     )
     normalized = _normalize(normalized_kind, payload, normalized_name)
+    if normalized_kind in {"perfil", "contexto"}:
+        normalized["extras_fields"] = _apply_memory_defaults_to_extras_fields(
+            _as_fields_list(normalized.get("extras_fields")),
+            [clean_memory, clean_answers],
+        )
 
     missing_required: list[str] = []
     if normalized_kind == "perfil" and not _strip_text(normalized.get("rol_base")):
@@ -575,9 +635,14 @@ def generate_master(kind: str, name: str, description: str) -> dict[str, Any]:
     return _normalize(normalized_kind, payload, normalized_name)
 
 
-# Mini smoke test manual:
-# 1) Abrir Asistente IA, elegir Perfil, escribir nombre y descripción breve.
-# 2) Pulsar "Usar datos del maestro seleccionado" y verificar memoria confirmada.
-# 3) Pulsar Diagnosticar en profundidad Rápido/Normal/Profundo y validar bloques Base/Extras.
-# 4) Añadir respuestas clave:valor (incluyendo listas con ; y JSON en extras) y Generar maestro.
-# 5) Confirmar que el draft final reutiliza memoria+maestros activos sin inventar identidad.
+# Mini smoke test manual (10 pasos):
+# 1) Abrir Asistente IA, elegir Perfil y nombre "Caqui II" con descripción agronómica.
+# 2) Cambiar tipo o nombre y verificar que pregunta si iniciar sesión nueva.
+# 3) Responder "Sí" y confirmar limpieza de memoria, preguntas, respuestas y preview JSON.
+# 4) Ejecutar Diagnosticar y validar que pregunta por base del maestro (rol_base/empresa/ubicacion/etc.) sin repetir keys ya respondidas.
+# 5) Verificar que en Respuestas aparece prellenado "key:" por cada pendiente.
+# 6) Completar varias respuestas y ejecutar Refinar; debe añadir solo preguntas nuevas (sin duplicados).
+# 7) Confirmar en memoria que las respuestas recién escritas quedan incorporadas.
+# 8) Generar maestro y validar coherencia de dominio (caqui/agro), sin arrastrar Python/SQLite o Senior IT no indicados.
+# 9) Validar que extras_fields sugeridos/finales copian default (y example vacío) desde respuestas del usuario por key coincidente.
+# 10) Alternar "Pantalla completa" y "Restaurar" y verificar que vuelve al tamaño previo.

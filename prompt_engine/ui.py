@@ -850,9 +850,14 @@ class AsistenteIADialog(tk.Toplevel):
         self.status_var = tk.StringVar(value="Listo")
         self.depth_var = tk.StringVar(value="Normal")
         self.memory: dict[str, object] = {}
+        self._pending_base_questions: list[dict[str, object]] = []
+        self._pending_extras_questions: list[dict[str, object]] = []
         self._session_id = self._new_session_id()
         self._session_fingerprint: tuple[str, str] = (self.kind_var.get().strip(), self.name_var.get().strip())
         self.use_active_master = False
+        self._is_fullscreen = False
+        self._previous_geometry = self.geometry()
+        self.fullscreen_button_var = tk.StringVar(value="Pantalla completa")
 
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
@@ -893,7 +898,16 @@ class AsistenteIADialog(tk.Toplevel):
             text="Usar datos del maestro seleccionado",
             command=self._use_selected_master_data,
         )
-        source_button.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 4))
+        source_button.grid(row=4, column=0, sticky="w", pady=(4, 4))
+
+        controls_row = ttk.Frame(frame)
+        controls_row.grid(row=4, column=1, sticky="e", pady=(4, 4))
+        ttk.Button(controls_row, text="Nueva sesión", command=self._on_new_session).pack(side="right", padx=(6, 0))
+        ttk.Button(
+            controls_row,
+            textvariable=self.fullscreen_button_var,
+            command=self._toggle_fullscreen,
+        ).pack(side="right", padx=(6, 0))
 
         qa_frame = ttk.LabelFrame(frame, text="Preguntas (rellena respuestas y vuelve a generar)")
         qa_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
@@ -1059,6 +1073,8 @@ class AsistenteIADialog(tk.Toplevel):
         self._future_session_id = None
         self.use_active_master = False
         self.memory = {}
+        self._pending_base_questions = []
+        self._pending_extras_questions = []
         self.diagnosis_data = None
         self.generated_data = None
         self._clear_text_widget(self.questions_text, readonly=True)
@@ -1070,6 +1086,38 @@ class AsistenteIADialog(tk.Toplevel):
         self.refine_button.configure(state="disabled")
         self.diagnose_button.configure(state="normal")
         self._update_session_fingerprint()
+
+    def _on_new_session(self) -> None:
+        restart = messagebox.askyesno(
+            "Asistente IA",
+            "¿Quieres iniciar una sesión nueva ahora?\n\n"
+            "Se limpiarán memoria, preguntas, respuestas y vista previa.",
+            parent=self,
+        )
+        if restart:
+            self._reset_session_state()
+
+    def _toggle_fullscreen(self) -> None:
+        if not self._is_fullscreen:
+            self._previous_geometry = self.geometry()
+            try:
+                self.state("zoomed")
+            except tk.TclError:
+                width = self.winfo_screenwidth()
+                height = self.winfo_screenheight()
+                self.geometry(f"{width}x{height}+0+0")
+            self._is_fullscreen = True
+            self.fullscreen_button_var.set("Restaurar")
+            return
+
+        try:
+            self.state("normal")
+        except tk.TclError:
+            pass
+        if self._previous_geometry:
+            self.geometry(self._previous_geometry)
+        self._is_fullscreen = False
+        self.fullscreen_button_var.set("Pantalla completa")
 
     def _active_ai_context(self) -> dict[str, object]:
         if not self.use_active_master:
@@ -1098,13 +1146,13 @@ class AsistenteIADialog(tk.Toplevel):
             perfil = context.get("perfil_activo") if isinstance(context.get("perfil_activo"), dict) else {}
             for key in ("empresa", "ubicacion", "rol_base", "rol", "nivel_tecnico", "herramientas", "prioridades"):
                 value = perfil.get(key) if isinstance(perfil, dict) else None
-                if value not in (None, "", []):
+                if key not in self.memory and value not in (None, "", []):
                     self.memory[key] = value
         elif kind == "contexto":
             contexto = context.get("contexto_activo") if isinstance(context.get("contexto_activo"), dict) else {}
             for key in ("rol_contextual", "enfoque", "no_hacer"):
                 value = contexto.get(key) if isinstance(contexto, dict) else None
-                if value not in (None, "", []):
+                if key not in self.memory and value not in (None, "", []):
                     self.memory[key] = value
         elif kind == "plantilla":
             plantilla = (
@@ -1113,9 +1161,25 @@ class AsistenteIADialog(tk.Toplevel):
                 else {}
             )
             label = plantilla.get("label") if isinstance(plantilla, dict) else None
-            if label:
+            if label and "label" not in self.memory:
                 self.memory["label"] = label
         self._render_memory()
+
+    @staticmethod
+    def _merge_question_lists(
+        existing: list[dict[str, object]],
+        incoming: list[dict[str, object]],
+        answered_keys: set[str],
+    ) -> list[dict[str, object]]:
+        merged: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for question in [*existing, *incoming]:
+            key = str(question.get("key", "")).strip()
+            if not key or key in answered_keys or key in seen:
+                continue
+            seen.add(key)
+            merged.append(question)
+        return merged
 
     def _on_kind_changed(self, _event: tk.Event | None = None) -> None:
         self._confirm_new_session_if_needed()
@@ -1199,6 +1263,8 @@ class AsistenteIADialog(tk.Toplevel):
         exclude_keys = sorted(self._answered_keys())
         self.diagnosis_data = None
         if reset_questions:
+            self._pending_base_questions = []
+            self._pending_extras_questions = []
             self._clear_text_widget(self.questions_text, readonly=True)
             self._clear_text_widget(self.answers_text)
         self._set_preview(None)
@@ -1276,16 +1342,10 @@ class AsistenteIADialog(tk.Toplevel):
             base_questions = result.get("base_questions") if isinstance(result.get("base_questions"), list) else []
             extras_questions = result.get("extras_questions") if isinstance(result.get("extras_questions"), list) else []
             answered_keys = self._answered_keys()
-            base_questions = [
-                question
-                for question in base_questions
-                if str(question.get("key", "")).strip() and str(question.get("key", "")).strip() not in answered_keys
-            ]
-            extras_questions = [
-                question
-                for question in extras_questions
-                if str(question.get("key", "")).strip() and str(question.get("key", "")).strip() not in answered_keys
-            ]
+            base_questions = self._merge_question_lists(self._pending_base_questions, base_questions, answered_keys)
+            extras_questions = self._merge_question_lists(self._pending_extras_questions, extras_questions, answered_keys)
+            self._pending_base_questions = base_questions
+            self._pending_extras_questions = extras_questions
             self._set_questions(base_questions, extras_questions)
             self._prefill_answers_from_questions(base_questions, extras_questions)
 

@@ -10,6 +10,7 @@ from typing import Any
 
 
 _ALLOWED_KINDS = {"perfil", "contexto", "plantilla"}
+MODEL_DEFAULT = "gpt-4o-mini"
 
 
 def resource_path(relative_path: str) -> Path:
@@ -145,6 +146,72 @@ def _normalize(kind: str, payload: dict[str, Any], name: str) -> dict[str, Any]:
     return _normalize_plantilla(payload, name)
 
 
+def _normalize_draft_lenient(kind: str, draft: dict[str, Any], name: str) -> dict[str, Any]:
+    if kind == "perfil":
+        normalized = {
+            "nombre": _strip_text(draft.get("nombre")) or name,
+            "rol": _strip_text(draft.get("rol")),
+            "rol_base": _strip_text(draft.get("rol_base")),
+            "empresa": _strip_text(draft.get("empresa")),
+            "ubicacion": _strip_text(draft.get("ubicacion")),
+            "herramientas": _as_string_list(draft.get("herramientas")),
+            "estilo": _strip_text(draft.get("estilo")),
+            "nivel_tecnico": _strip_text(draft.get("nivel_tecnico")),
+            "prioridades": _as_string_list(draft.get("prioridades")),
+            "extras_fields": _as_fields_list(draft.get("extras_fields")),
+        }
+        if not normalized["rol"] and normalized["rol_base"]:
+            normalized["rol"] = normalized["rol_base"]
+        if not normalized["rol_base"] and normalized["rol"]:
+            normalized["rol_base"] = normalized["rol"]
+        return normalized
+
+    if kind == "contexto":
+        return {
+            "nombre": _strip_text(draft.get("nombre")) or name,
+            "rol_contextual": _strip_text(draft.get("rol_contextual")),
+            "enfoque": _as_string_list(draft.get("enfoque")),
+            "no_hacer": _as_string_list(draft.get("no_hacer")),
+            "extras_fields": _as_fields_list(draft.get("extras_fields")),
+        }
+
+    return {
+        "nombre": _strip_text(draft.get("nombre")) or name,
+        "label": _strip_text(draft.get("label")),
+        "fields": _as_fields_list(draft.get("fields")),
+        "ejemplos": _as_string_list(draft.get("ejemplos")),
+    }
+
+
+def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str) -> dict[str, Any]:
+    preguntas_raw = payload.get("preguntas")
+    preguntas: list[dict[str, Any]] = []
+    if isinstance(preguntas_raw, list):
+        for item in preguntas_raw:
+            if not isinstance(item, dict):
+                continue
+            key = _strip_text(item.get("key"))
+            question = _strip_text(item.get("question"))
+            if not key or not question:
+                continue
+            required = bool(item.get("required", False))
+            preguntas.append({"key": key, "question": question, "required": required})
+    preguntas = preguntas[:8]
+
+    normalized = {
+        "nombre": _strip_text(payload.get("nombre")) or name,
+        "kind": kind,
+        "preguntas": preguntas,
+        "extras_fields_sugeridos": _as_fields_list(payload.get("extras_fields_sugeridos")),
+        "draft": _normalize_draft_lenient(
+            kind,
+            payload.get("draft") if isinstance(payload.get("draft"), dict) else {},
+            name,
+        ),
+    }
+    return normalized
+
+
 def _load_api_key() -> str:
     env_key = _strip_text(os.getenv("OPENAI_API_KEY"))
     if env_key:
@@ -207,6 +274,135 @@ def _system_prompt(kind: str, name: str) -> str:
     )
 
 
+def _diagnosis_system_prompt(kind: str, name: str) -> str:
+    return (
+        "Eres un asistente experto en diseño de maestros para PROM-9. "
+        "Devuelve SOLO JSON del esquema diagnosis; no markdown; no texto; no inventes; si falta info, pregunta. "
+        "No inventes datos de identidad (empresa, ubicación, personas, clientes). "
+        "Genera como máximo 8 preguntas, priorizando calidad del maestro. "
+        "Usa keys simples y estables en snake_case. "
+        f"Tipo: {kind}. Nombre esperado: {name}. "
+        "Esquema exacto: "
+        "{"
+        '"nombre":"...",'
+        '"kind":"perfil|contexto|plantilla",'
+        '"preguntas":[{"key":"...","question":"...","required":false}],'
+        '"extras_fields_sugeridos":[{"key":"...","label":"...","help":"...","example":"...","default":""}],'
+        '"draft":{...}'
+        "}. "
+        "En draft deja cadenas vacías o listas vacías cuando falte información."
+    )
+
+
+def _final_system_prompt(kind: str, name: str) -> str:
+    return (
+        "Eres un asistente experto en diseño de maestros para PROM-9. "
+        "Devuelve SOLO JSON maestro; usa answers; no inventes; "
+        "lo que no se indique queda en '' o listas vacías; "
+        "extras_fields incluir sugerencias útiles si el usuario no las definió. "
+        "No markdown, no texto adicional. "
+        "No inventes datos personales/empresa/ubicación. "
+        f"Tipo: {kind}. Nombre esperado: {name}.\n\n{_system_prompt(kind, name)}"
+    )
+
+
+def _create_client() -> Any:
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError("OpenAI no instalado. Instala el paquete 'openai' para usar el Asistente IA.") from exc
+    return OpenAI(api_key=_load_api_key())
+
+
+def _request_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    client = _create_client()
+    response = client.chat.completions.create(
+        model=MODEL_DEFAULT,
+        temperature=0.2,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    raw_content = ""
+    if response.choices:
+        raw_content = _strip_text(response.choices[0].message.content)
+    if not raw_content:
+        raise RuntimeError("OpenAI no devolvió contenido para generar el maestro.")
+    return _extract_json(raw_content)
+
+
+def generate_master_diagnosis(kind: str, name: str, description: str) -> dict[str, Any]:
+    normalized_kind = _strip_text(kind).lower()
+    normalized_name = _strip_text(name)
+    normalized_description = _strip_text(description)
+
+    if normalized_kind not in _ALLOWED_KINDS:
+        raise RuntimeError("Tipo de maestro inválido. Usa Perfil, Contexto o Plantilla.")
+    if not normalized_name:
+        raise RuntimeError("El nombre del maestro es obligatorio.")
+    if not normalized_description:
+        raise RuntimeError("La descripción es obligatoria para diagnosticar con IA.")
+
+    payload = _request_json(
+        _diagnosis_system_prompt(normalized_kind, normalized_name),
+        (
+            f"Diagnostica el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
+            f"Descripción funcional: {normalized_description}"
+        ),
+    )
+    return _normalize_diagnosis(normalized_kind, payload, normalized_name)
+
+
+def generate_master_with_answers(
+    kind: str,
+    name: str,
+    description: str,
+    answers: dict[str, str],
+) -> dict[str, Any]:
+    normalized_kind = _strip_text(kind).lower()
+    normalized_name = _strip_text(name)
+    normalized_description = _strip_text(description)
+
+    if normalized_kind not in _ALLOWED_KINDS:
+        raise RuntimeError("Tipo de maestro inválido. Usa Perfil, Contexto o Plantilla.")
+    if not normalized_name:
+        raise RuntimeError("El nombre del maestro es obligatorio.")
+    if not normalized_description:
+        raise RuntimeError("La descripción es obligatoria para generar con IA.")
+
+    clean_answers: dict[str, str] = {}
+    for key, value in answers.items():
+        clean_key = _strip_text(key)
+        if clean_key:
+            clean_answers[clean_key] = _strip_text(value)
+
+    payload = _request_json(
+        _final_system_prompt(normalized_kind, normalized_name),
+        (
+            f"Genera el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
+            f"Descripción funcional: {normalized_description}. "
+            "Usa estas respuestas del usuario para completar faltantes: "
+            f"{json.dumps(clean_answers, ensure_ascii=False)}"
+        ),
+    )
+    normalized = _normalize(normalized_kind, payload, normalized_name)
+
+    missing_required: list[str] = []
+    if normalized_kind == "perfil" and not _strip_text(normalized.get("rol_base")):
+        missing_required.append("rol_base")
+    if normalized_kind == "contexto" and not _strip_text(normalized.get("rol_contextual")):
+        missing_required.append("rol_contextual")
+    if normalized_kind == "plantilla" and not _strip_text(normalized.get("label")):
+        missing_required.append("label")
+
+    if missing_required:
+        raise RuntimeError(
+            "Faltan campos críticos requeridos para generar el maestro: " + ", ".join(missing_required)
+        )
+    return normalized
+
+
 def generate_master(kind: str, name: str, description: str) -> dict[str, Any]:
     """Genera un maestro normalizado usando OpenAI Chat Completions."""
     normalized_kind = _strip_text(kind).lower()
@@ -220,34 +416,16 @@ def generate_master(kind: str, name: str, description: str) -> dict[str, Any]:
     if not normalized_description:
         raise RuntimeError("La descripción es obligatoria para generar con IA.")
 
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise RuntimeError("OpenAI no instalado. Instala el paquete 'openai' para usar el Asistente IA.") from exc
-
-    api_key = _load_api_key()
-
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        temperature=0.2,
-        messages=[
-            {"role": "system", "content": _system_prompt(normalized_kind, normalized_name)},
-            {
-                "role": "user",
-                "content": (
-                    f"Genera el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
-                    f"Descripción funcional: {normalized_description}"
-                ),
-            },
-        ],
+    payload = _request_json(
+        _system_prompt(normalized_kind, normalized_name),
+        (
+            f"Genera el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
+            f"Descripción funcional: {normalized_description}"
+        ),
     )
-
-    raw_content = ""
-    if response.choices:
-        raw_content = _strip_text(response.choices[0].message.content)
-    if not raw_content:
-        raise RuntimeError("OpenAI no devolvió contenido para generar el maestro.")
-
-    payload = _extract_json(raw_content)
     return _normalize(normalized_kind, payload, normalized_name)
+
+
+# Mini smoke test manual:
+# - Diagnosticar Perfil con descripción mínima debería devolver preguntas + draft
+#   sin romper aunque falten rol_base/empresa/ubicacion.

@@ -196,11 +196,60 @@ def _normalize_slots(value: Any) -> dict[str, str]:
     return normalized
 
 
-def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str, max_questions: int) -> dict[str, Any]:
-    preguntas_raw = payload.get("preguntas")
-    preguntas: list[dict[str, Any]] = []
-    if isinstance(preguntas_raw, list):
-        for item in preguntas_raw:
+_DOMAIN_EXTRA_KEYS = {
+    "agro": [
+        "cultivo_objetivo",
+        "campana_actual",
+        "zona_productiva",
+        "tipo_suelo",
+        "riesgos_climaticos",
+        "ventana_aplicacion",
+    ],
+    "it": [
+        "stack_principal",
+        "entorno_despliegue",
+        "nivel_seguridad",
+        "sla_objetivo",
+        "metrica_exito",
+        "restricciones_tecnicas",
+    ],
+    "ventas": [
+        "segmento_cliente",
+        "ticket_promedio",
+        "canal_principal",
+        "objeciones_frecuentes",
+        "ciclo_venta",
+        "kpi_comercial",
+    ],
+    "contabilidad": [
+        "regimen_fiscal",
+        "periodicidad_reporte",
+        "plan_cuentas",
+        "politica_gastos",
+        "riesgo_auditoria",
+        "nivel_detalle_informe",
+    ],
+}
+
+
+def _detect_domain_family(description: str) -> str:
+    text = _strip_text(description).lower()
+    heuristics = {
+        "agro": ("agro", "cultivo", "siembra", "fertil", "riego", "cosecha"),
+        "it": ("software", "it", "dev", "api", "backend", "frontend", "infra", "cloud"),
+        "ventas": ("ventas", "comercial", "lead", "pipeline", "prospect", "crm"),
+        "contabilidad": ("contable", "contabilidad", "fiscal", "balance", "tribut", "auditor"),
+    }
+    for family, words in heuristics.items():
+        if any(word in text for word in words):
+            return family
+    return ""
+
+
+def _normalize_diagnosis_questions(raw: Any, max_questions: int) -> list[dict[str, Any]]:
+    questions: list[dict[str, Any]] = []
+    if isinstance(raw, list):
+        for item in raw:
             if not isinstance(item, dict):
                 continue
             key = _strip_text(item.get("key"))
@@ -209,15 +258,22 @@ def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str, max_ques
                 continue
             required = bool(item.get("required", False))
             why = _strip_text(item.get("why"))
-            preguntas.append({"key": key, "question": question, "required": required, "why": why})
-    preguntas = preguntas[:max(1, min(max_questions, 20))]
+            questions.append({"key": key, "question": question, "required": required, "why": why})
+    return questions[:max(1, min(max_questions, 20))]
+
+
+def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str, max_questions: int) -> dict[str, Any]:
+    base_questions = _normalize_diagnosis_questions(payload.get("base_questions"), max_questions)
+    extras_questions = _normalize_diagnosis_questions(payload.get("extras_questions"), max_questions)
+    if not base_questions:
+        base_questions = _normalize_diagnosis_questions(payload.get("preguntas"), max_questions)
 
     normalized = {
         "nombre": _strip_text(payload.get("nombre")) or name,
         "kind": kind,
-        "slots": _normalize_slots(payload.get("slots")),
-        "preguntas": preguntas,
+        "base_questions": base_questions,
         "extras_fields_sugeridos": _as_fields_list(payload.get("extras_fields_sugeridos")),
+        "extras_questions": extras_questions,
         "draft": _normalize_draft_lenient(
             kind,
             payload.get("draft") if isinstance(payload.get("draft"), dict) else {},
@@ -289,22 +345,27 @@ def _system_prompt(kind: str, name: str) -> str:
     )
 
 
-def _diagnosis_system_prompt(kind: str, name: str, depth: int, max_questions: int) -> str:
+def _diagnosis_system_prompt(kind: str, name: str, max_questions: int, domain_family: str) -> str:
+    domain_keys = _DOMAIN_EXTRA_KEYS.get(domain_family, [])
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
         "Devuelve SOLO JSON del esquema diagnosis; no markdown; no texto; no inventes; si falta info, pregunta. "
         "No inventes datos de identidad (empresa, ubicación, personas, clientes). "
-        f"Genera como máximo {max_questions} preguntas, priorizando calidad del maestro. "
-        f"Profundidad solicitada: {depth} (1=rápido, 2=normal, 3=profundo). "
+        f"Genera como máximo {max_questions} preguntas en base_questions y 6 en extras_questions. "
+        "base_questions: para campos base críticos del maestro (rol_base/rol_contextual/label, etc). "
+        "extras_fields_sugeridos: entre 6 y 12 campos extra reutilizables y útiles. "
+        "extras_questions: entre 3 y 6 preguntas para afinar esos extras. "
         "Usa keys simples y estables en snake_case. "
         f"Tipo: {kind}. Nombre esperado: {name}. "
+        f"Familia de dominio detectada: {domain_family or 'general'}. "
+        f"Keys recomendadas por familia (sin forzar valores): {json.dumps(domain_keys, ensure_ascii=False)}. "
         "Esquema exacto: "
         "{"
         '"nombre":"...",'
         '"kind":"perfil|contexto|plantilla",'
-        '"slots":{"campo":"known|missing|unclear"},'
-        '"preguntas":[{"key":"...","question":"...","required":false,"why":"..."}],'
+        '"base_questions":[{"key":"...","question":"...","required":false,"why":"..."}],'
         '"extras_fields_sugeridos":[{"key":"...","label":"...","help":"...","example":"...","default":""}],'
+        '"extras_questions":[{"key":"...","question":"...","required":false,"why":"..."}],'
         '"draft":{...}'
         "}. "
         "En draft deja cadenas vacías o listas vacías cuando falte información."
@@ -354,9 +415,8 @@ def generate_master_diagnosis(
     name: str,
     description: str,
     memory: dict[str, Any] | None = None,
-    depth: int = 2,
     max_questions: int = 8,
-    ui_context: dict[str, Any] | None = None,
+    masters_activos: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_kind = _strip_text(kind).lower()
     normalized_name = _strip_text(name)
@@ -370,18 +430,18 @@ def generate_master_diagnosis(
         raise RuntimeError("La descripción es obligatoria para diagnosticar con IA.")
 
     clean_memory = memory if isinstance(memory, dict) else {}
-    clean_ui_context = ui_context if isinstance(ui_context, dict) else {}
-    safe_depth = max(1, min(int(depth), 3))
+    clean_ui_context = masters_activos if isinstance(masters_activos, dict) else {}
     safe_max_questions = max(1, min(int(max_questions), 20))
+    domain_family = _detect_domain_family(normalized_description)
 
     payload = _request_json(
-        _diagnosis_system_prompt(normalized_kind, normalized_name, safe_depth, safe_max_questions),
+        _diagnosis_system_prompt(normalized_kind, normalized_name, safe_max_questions, domain_family),
         (
             f"Diagnostica el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
             f"Descripción funcional: {normalized_description}. "
             "Memoria confirmada (respuestas acumuladas): "
             f"{json.dumps(clean_memory, ensure_ascii=False)}. "
-            "Contexto activo de la UI (perfil/contexto/plantilla): "
+            "Maestros activos de la UI (perfil/contexto/plantilla seleccionada), para no reinventar datos: "
             f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
     )
@@ -394,7 +454,7 @@ def generate_master_with_answers(
     description: str,
     memory: dict[str, Any] | None = None,
     answers: dict[str, Any] | None = None,
-    ui_context: dict[str, Any] | None = None,
+    masters_activos: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_kind = _strip_text(kind).lower()
     normalized_name = _strip_text(name)
@@ -423,7 +483,7 @@ def generate_master_with_answers(
         if clean_key:
             clean_memory[clean_key] = value
 
-    clean_ui_context = ui_context if isinstance(ui_context, dict) else {}
+    clean_ui_context = masters_activos if isinstance(masters_activos, dict) else {}
 
     payload = _request_json(
         _final_system_prompt(normalized_kind, normalized_name),
@@ -434,7 +494,8 @@ def generate_master_with_answers(
             f"{json.dumps(clean_memory, ensure_ascii=False)}. "
             "Usa estas respuestas del usuario para completar faltantes: "
             f"{json.dumps(clean_answers, ensure_ascii=False)}. "
-            "Contexto activo de la UI (perfil/contexto/plantilla): "
+            "Maestros activos de la UI (perfil/contexto/plantilla seleccionada), úsalo para completar sin inventar "
+            "priorizando campos base y extras_fields y luego listas: "
             f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
     )
@@ -479,5 +540,8 @@ def generate_master(kind: str, name: str, description: str) -> dict[str, Any]:
 
 
 # Mini smoke test manual:
-# - Diagnosticar Perfil con descripción mínima debería devolver preguntas + draft
-#   sin romper aunque falten rol_base/empresa/ubicacion.
+# 1) Abrir Asistente IA, elegir Perfil, escribir nombre y descripción breve.
+# 2) Pulsar "Usar datos del maestro seleccionado" y verificar memoria confirmada.
+# 3) Pulsar Diagnosticar en profundidad Rápido/Normal/Profundo y validar bloques Base/Extras.
+# 4) Añadir respuestas clave:valor (incluyendo listas con ; y JSON en extras) y Generar maestro.
+# 5) Confirmar que el draft final reutiliza memoria+maestros activos sin inventar identidad.

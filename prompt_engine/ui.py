@@ -847,7 +847,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.name_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Listo")
         self.depth_var = tk.StringVar(value="Normal")
-        self.memory_confirmed: dict[str, object] = {}
+        self.memory: dict[str, object] = {}
 
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
@@ -880,8 +880,15 @@ class AsistenteIADialog(tk.Toplevel):
         )
         self.depth_combo.grid(row=3, column=1, sticky="ew", pady=4)
 
+        source_button = ttk.Button(
+            frame,
+            text="Usar datos del maestro seleccionado",
+            command=self._use_selected_master_data,
+        )
+        source_button.grid(row=4, column=0, columnspan=2, sticky="w", pady=(4, 4))
+
         qa_frame = ttk.LabelFrame(frame, text="Preguntas (rellena respuestas y vuelve a generar)")
-        qa_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        qa_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
         qa_frame.columnconfigure(0, weight=1)
         qa_frame.columnconfigure(1, weight=1)
         qa_frame.rowconfigure(1, weight=1)
@@ -897,7 +904,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.answers_text.grid(row=1, column=1, sticky="nsew", padx=(4, 8), pady=(0, 8))
 
         memory_frame = ttk.LabelFrame(frame, text="Memoria confirmada")
-        memory_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        memory_frame.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
         memory_frame.columnconfigure(0, weight=1)
         memory_frame.rowconfigure(0, weight=1)
 
@@ -906,7 +913,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.memory_text.configure(state="disabled")
 
         preview_frame = ttk.LabelFrame(frame, text="Vista previa JSON")
-        preview_frame.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        preview_frame.grid(row=7, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(0, weight=1)
 
@@ -915,7 +922,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.preview_text.configure(state="disabled")
 
         footer = ttk.Frame(frame)
-        footer.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        footer.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Label(footer, textvariable=self.status_var).pack(side="left")
         self.generate_master_button = ttk.Button(footer, text="Generar maestro", command=self._on_generate_master)
         self.generate_master_button.pack(side="right", padx=(6, 0))
@@ -945,18 +952,18 @@ class AsistenteIADialog(tk.Toplevel):
             return widget.get_text()
         return widget.get("1.0", "end").strip()
 
-    def _update_memory_view(self) -> None:
+    def _render_memory(self) -> None:
         self.memory_text.configure(state="normal")
         self.memory_text.delete("1.0", "end")
-        if self.memory_confirmed:
-            self.memory_text.insert("1.0", json.dumps(self.memory_confirmed, ensure_ascii=False, indent=2))
+        if self.memory:
+            self.memory_text.insert("1.0", json.dumps(self.memory, ensure_ascii=False, indent=2))
         self.memory_text.configure(state="disabled")
 
     def _merge_answers_into_memory(self) -> None:
         answers = self._parse_answers(self._read_text_widget(self.answers_text))
         if answers:
-            self.memory_confirmed.update(answers)
-            self._update_memory_view()
+            self.memory.update(answers)
+            self._render_memory()
 
     def _depth_settings(self) -> dict[str, int]:
         return self._DEPTH_CONFIG.get(self.depth_var.get(), self._DEPTH_CONFIG["Normal"])
@@ -968,31 +975,68 @@ class AsistenteIADialog(tk.Toplevel):
         return {
             "perfil_activo": perfil if isinstance(perfil, dict) else {},
             "contexto_activo": contexto if isinstance(contexto, dict) else {},
-            "plantilla_activa": plantilla if isinstance(plantilla, dict) else {},
+            "plantilla_seleccionada": plantilla if isinstance(plantilla, dict) else {},
         }
+
+    def _use_selected_master_data(self) -> None:
+        context = self._active_ai_context()
+        kind = self._kind_key()
+        if kind == "perfil":
+            perfil = context.get("perfil_activo") if isinstance(context.get("perfil_activo"), dict) else {}
+            for key in ("empresa", "ubicacion", "rol_base", "rol", "nivel_tecnico", "herramientas", "prioridades"):
+                value = perfil.get(key) if isinstance(perfil, dict) else None
+                if value not in (None, "", []):
+                    self.memory[key] = value
+        elif kind == "contexto":
+            contexto = context.get("contexto_activo") if isinstance(context.get("contexto_activo"), dict) else {}
+            for key in ("rol_contextual", "enfoque", "no_hacer"):
+                value = contexto.get(key) if isinstance(contexto, dict) else None
+                if value not in (None, "", []):
+                    self.memory[key] = value
+        elif kind == "plantilla":
+            plantilla = (
+                context.get("plantilla_seleccionada")
+                if isinstance(context.get("plantilla_seleccionada"), dict)
+                else {}
+            )
+            label = plantilla.get("label") if isinstance(plantilla, dict) else None
+            if label:
+                self.memory["label"] = label
+        self._render_memory()
 
     def _on_kind_changed(self, _event: tk.Event | None = None) -> None:
         self._clear_text_widget(self.questions_text, readonly=True)
         self._clear_text_widget(self.answers_text)
-        self.memory_confirmed = {}
-        self._update_memory_view()
         self._set_preview(None)
         self.generated_data = None
         self.diagnosis_data = None
         self.status_var.set("Listo")
         self.generate_master_button.configure(state="disabled")
 
-    def _set_questions(self, questions: list[dict[str, object]]) -> None:
+    def _set_questions(
+        self,
+        base_questions: list[dict[str, object]],
+        extras_questions: list[dict[str, object]],
+    ) -> None:
         self.questions_text.configure(state="normal")
         self.questions_text.delete("1.0", "end")
-        lines: list[str] = []
-        for idx, question in enumerate(questions, start=1):
-            key = str(question.get("key", "")).strip()
-            text = str(question.get("question", "")).strip()
-            required = bool(question.get("required", False))
-            suffix = " [requerida]" if required else ""
-            if key and text:
-                lines.append(f"{idx}. ({key}) {text}{suffix}")
+
+        def _format_block(title: str, questions: list[dict[str, object]]) -> list[str]:
+            lines = [title]
+            for idx, question in enumerate(questions, start=1):
+                key = str(question.get("key", "")).strip()
+                text = str(question.get("question", "")).strip()
+                required = bool(question.get("required", False))
+                suffix = " [requerida]" if required else ""
+                if key and text:
+                    lines.append(f"{idx}. ({key}) {text}{suffix}")
+            if len(lines) == 1:
+                lines.append("- Sin preguntas en este bloque")
+            return lines
+
+        lines = _format_block("Base (obligatorio)", base_questions)
+        lines.append("")
+        lines.extend(_format_block("Extras (para afinar)", extras_questions))
         if lines:
             self.questions_text.insert("1.0", "\n".join(lines))
         self.questions_text.configure(state="disabled")
@@ -1043,6 +1087,8 @@ class AsistenteIADialog(tk.Toplevel):
 
         self._merge_answers_into_memory()
         self.diagnosis_data = None
+        self._clear_text_widget(self.questions_text, readonly=True)
+        self._set_preview(None)
         self.diagnose_button.configure(state="disabled")
         self.generate_master_button.configure(state="disabled")
         self.refine_button.configure(state="disabled")
@@ -1053,8 +1099,7 @@ class AsistenteIADialog(tk.Toplevel):
             self._kind_key(),
             name,
             description,
-            dict(self.memory_confirmed),
-            depth_settings["depth"],
+            dict(self.memory),
             depth_settings["max_questions"],
             self._active_ai_context(),
         )
@@ -1075,8 +1120,8 @@ class AsistenteIADialog(tk.Toplevel):
             messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
             return
 
-        self.memory_confirmed.update(answers)
-        self._update_memory_view()
+        self.memory.update(answers)
+        self._render_memory()
 
         self.diagnose_button.configure(state="disabled")
         self.refine_button.configure(state="disabled")
@@ -1087,7 +1132,7 @@ class AsistenteIADialog(tk.Toplevel):
             self._kind_key(),
             name,
             description,
-            dict(self.memory_confirmed),
+            dict(self.memory),
             answers,
             self._active_ai_context(),
         )
@@ -1105,8 +1150,9 @@ class AsistenteIADialog(tk.Toplevel):
             if not isinstance(result, dict):
                 raise RuntimeError("El diagnóstico devolvió un formato inválido.")
             self.diagnosis_data = result
-            questions = result.get("preguntas") if isinstance(result.get("preguntas"), list) else []
-            self._set_questions(questions)
+            base_questions = result.get("base_questions") if isinstance(result.get("base_questions"), list) else []
+            extras_questions = result.get("extras_questions") if isinstance(result.get("extras_questions"), list) else []
+            self._set_questions(base_questions, extras_questions)
 
             draft = result.get("draft")
             if isinstance(draft, dict):

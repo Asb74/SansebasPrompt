@@ -345,7 +345,13 @@ def _system_prompt(kind: str, name: str) -> str:
     )
 
 
-def _diagnosis_system_prompt(kind: str, name: str, max_questions: int, domain_family: str) -> str:
+def _diagnosis_system_prompt(
+    kind: str,
+    name: str,
+    max_questions: int,
+    domain_family: str,
+    exclude_keys: list[str],
+) -> str:
     domain_keys = _DOMAIN_EXTRA_KEYS.get(domain_family, [])
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
@@ -355,10 +361,14 @@ def _diagnosis_system_prompt(kind: str, name: str, max_questions: int, domain_fa
         "base_questions: para campos base críticos del maestro (rol_base/rol_contextual/label, etc). "
         "extras_fields_sugeridos: entre 6 y 12 campos extra reutilizables y útiles. "
         "extras_questions: entre 3 y 6 preguntas para afinar esos extras. "
+        "No preguntes por keys presentes en exclude_keys. "
+        "base_questions = solo campos base críticos aún no cubiertos. "
+        "extras_questions = solo extras útiles que NO estén ya cubiertos. "
         "Usa keys simples y estables en snake_case. "
         f"Tipo: {kind}. Nombre esperado: {name}. "
         f"Familia de dominio detectada: {domain_family or 'general'}. "
         f"Keys recomendadas por familia (sin forzar valores): {json.dumps(domain_keys, ensure_ascii=False)}. "
+        f"exclude_keys ya resueltas: {json.dumps(exclude_keys, ensure_ascii=False)}. "
         "Esquema exacto: "
         "{"
         '"nombre":"...",'
@@ -372,10 +382,25 @@ def _diagnosis_system_prompt(kind: str, name: str, max_questions: int, domain_fa
     )
 
 
+def _clean_non_empty_map(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    cleaned: dict[str, Any] = {}
+    for key, value in payload.items():
+        clean_key = _strip_text(key)
+        if not clean_key or value in (None, "", [], {}):
+            continue
+        cleaned[clean_key] = value
+    return cleaned
+
+
 def _final_system_prompt(kind: str, name: str) -> str:
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
         "Devuelve SOLO JSON maestro; usa answers; no inventes; "
+        "rellena primero campos base críticos, luego extras_fields útiles y luego el resto. "
+        "Prioriza memoria+answers del usuario por encima de masters_activos si hay conflicto. "
+        "No clones el maestro activo: genera uno actualizado a partir de la conversación. "
         "lo que no se indique queda en '' o listas vacías; "
         "extras_fields incluir sugerencias útiles si el usuario no las definió. "
         "No markdown, no texto adicional. "
@@ -417,6 +442,8 @@ def generate_master_diagnosis(
     memory: dict[str, Any] | None = None,
     max_questions: int = 8,
     masters_activos: dict[str, Any] | None = None,
+    exclude_keys: list[str] | None = None,
+    focus: str = "balanced",
 ) -> dict[str, Any]:
     normalized_kind = _strip_text(kind).lower()
     normalized_name = _strip_text(name)
@@ -429,18 +456,36 @@ def generate_master_diagnosis(
     if not normalized_description:
         raise RuntimeError("La descripción es obligatoria para diagnosticar con IA.")
 
-    clean_memory = memory if isinstance(memory, dict) else {}
+    clean_memory = _clean_non_empty_map(memory)
     clean_ui_context = masters_activos if isinstance(masters_activos, dict) else {}
     safe_max_questions = max(1, min(int(max_questions), 20))
     domain_family = _detect_domain_family(normalized_description)
+    normalized_focus = _strip_text(focus).lower()
+    if normalized_focus not in {"base", "extras", "balanced"}:
+        normalized_focus = "balanced"
+
+    clean_exclude_keys: list[str] = []
+    for key in (exclude_keys or []):
+        clean_key = _strip_text(key)
+        if clean_key:
+            clean_exclude_keys.append(clean_key)
 
     payload = _request_json(
-        _diagnosis_system_prompt(normalized_kind, normalized_name, safe_max_questions, domain_family),
+        _diagnosis_system_prompt(
+            normalized_kind,
+            normalized_name,
+            safe_max_questions,
+            domain_family,
+            clean_exclude_keys,
+        ),
         (
             f"Diagnostica el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
             f"Descripción funcional: {normalized_description}. "
+            f"En esta iteración prioriza: {normalized_focus}. "
             "Memoria confirmada (respuestas acumuladas): "
             f"{json.dumps(clean_memory, ensure_ascii=False)}. "
+            "No preguntes por keys presentes en exclude_keys. "
+            f"exclude_keys: {json.dumps(clean_exclude_keys, ensure_ascii=False)}. "
             "Maestros activos de la UI (perfil/contexto/plantilla seleccionada), para no reinventar datos: "
             f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
@@ -471,17 +516,8 @@ def generate_master_with_answers(
         answers = memory if isinstance(memory, dict) else {}
         memory = {}
 
-    clean_answers: dict[str, Any] = {}
-    for key, value in (answers or {}).items():
-        clean_key = _strip_text(key)
-        if clean_key:
-            clean_answers[clean_key] = value
-
-    clean_memory: dict[str, Any] = {}
-    for key, value in (memory or {}).items():
-        clean_key = _strip_text(key)
-        if clean_key:
-            clean_memory[clean_key] = value
+    clean_answers = _clean_non_empty_map(answers)
+    clean_memory = _clean_non_empty_map(memory)
 
     clean_ui_context = masters_activos if isinstance(masters_activos, dict) else {}
 

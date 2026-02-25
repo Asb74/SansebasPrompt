@@ -959,11 +959,64 @@ class AsistenteIADialog(tk.Toplevel):
             self.memory_text.insert("1.0", json.dumps(self.memory, ensure_ascii=False, indent=2))
         self.memory_text.configure(state="disabled")
 
+    def _answered_keys(self) -> set[str]:
+        answered: set[str] = set()
+        for key, value in self.memory.items():
+            clean_key = str(key).strip()
+            if clean_key and value not in (None, "", [], {}):
+                answered.add(clean_key)
+        return answered
+
+    @staticmethod
+    def _parse_answer_lines(raw: str) -> dict[str, str]:
+        parsed: dict[str, str] = {}
+        for line in raw.splitlines():
+            clean = line.strip()
+            if not clean or ":" not in clean:
+                continue
+            key, value = clean.split(":", 1)
+            clean_key = key.strip()
+            if clean_key:
+                parsed[clean_key] = value.strip()
+        return parsed
+
     def _merge_answers_into_memory(self) -> None:
         answers = self._parse_answers(self._read_text_widget(self.answers_text))
-        if answers:
-            self.memory.update(answers)
-            self._render_memory()
+        for key, value in answers.items():
+            if value in (None, "", [], {}):
+                continue
+            self.memory[key] = value
+        self._render_memory()
+
+    def _prefill_answers_from_questions(
+        self,
+        base_questions: list[dict[str, object]],
+        extras_questions: list[dict[str, object]],
+    ) -> None:
+        current_raw = self._read_text_widget(self.answers_text)
+        existing_pairs = self._parse_answer_lines(current_raw)
+        answered_keys = self._answered_keys()
+        ordered_pending_keys: list[str] = []
+
+        for question in [*base_questions, *extras_questions]:
+            key = str(question.get("key", "")).strip()
+            if not key or key in answered_keys or key in ordered_pending_keys:
+                continue
+            ordered_pending_keys.append(key)
+
+        prefilled_lines = [f"{key}: {existing_pairs.get(key, '').strip()}" for key in ordered_pending_keys]
+
+        for line in current_raw.splitlines():
+            clean_line = line.strip()
+            if not clean_line:
+                continue
+            if ":" in clean_line:
+                key, _value = clean_line.split(":", 1)
+                if key.strip() in ordered_pending_keys:
+                    continue
+            prefilled_lines.append(clean_line)
+
+        self.answers_text.set_text("\n".join(prefilled_lines))
 
     def _depth_settings(self) -> dict[str, int]:
         return self._DEPTH_CONFIG.get(self.depth_var.get(), self._DEPTH_CONFIG["Normal"])
@@ -1075,7 +1128,7 @@ class AsistenteIADialog(tk.Toplevel):
     def _kind_key(self) -> str:
         return self.kind_var.get().strip().lower()
 
-    def _on_diagnose(self) -> None:
+    def _request_diagnosis(self, focus: str, reset_questions: bool) -> None:
         name = self.name_var.get().strip()
         description = self._read_text_widget(self.description_text)
         if not name:
@@ -1086,8 +1139,10 @@ class AsistenteIADialog(tk.Toplevel):
             return
 
         self._merge_answers_into_memory()
+        exclude_keys = sorted(self._answered_keys())
         self.diagnosis_data = None
-        self._clear_text_widget(self.questions_text, readonly=True)
+        if reset_questions:
+            self._clear_text_widget(self.questions_text, readonly=True)
         self._set_preview(None)
         self.diagnose_button.configure(state="disabled")
         self.generate_master_button.configure(state="disabled")
@@ -1102,16 +1157,20 @@ class AsistenteIADialog(tk.Toplevel):
             dict(self.memory),
             depth_settings["max_questions"],
             self._active_ai_context(),
+            exclude_keys,
+            focus,
         )
         self.after(80, self._poll_diagnosis)
 
+    def _on_diagnose(self) -> None:
+        self._request_diagnosis(focus="base", reset_questions=True)
+
     def _on_refine(self) -> None:
-        self._on_diagnose()
+        self._request_diagnosis(focus="balanced", reset_questions=False)
 
     def _on_generate_master(self) -> None:
         name = self.name_var.get().strip()
         description = self._read_text_widget(self.description_text)
-        answers = self._parse_answers(self._read_text_widget(self.answers_text))
 
         if not name:
             messagebox.showwarning("Asistente IA", "El nombre es obligatorio.", parent=self)
@@ -1120,8 +1179,8 @@ class AsistenteIADialog(tk.Toplevel):
             messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
             return
 
-        self.memory.update(answers)
-        self._render_memory()
+        self._merge_answers_into_memory()
+        answers = self._parse_answers(self._read_text_widget(self.answers_text))
 
         self.diagnose_button.configure(state="disabled")
         self.refine_button.configure(state="disabled")
@@ -1152,7 +1211,19 @@ class AsistenteIADialog(tk.Toplevel):
             self.diagnosis_data = result
             base_questions = result.get("base_questions") if isinstance(result.get("base_questions"), list) else []
             extras_questions = result.get("extras_questions") if isinstance(result.get("extras_questions"), list) else []
+            answered_keys = self._answered_keys()
+            base_questions = [
+                question
+                for question in base_questions
+                if str(question.get("key", "")).strip() and str(question.get("key", "")).strip() not in answered_keys
+            ]
+            extras_questions = [
+                question
+                for question in extras_questions
+                if str(question.get("key", "")).strip() and str(question.get("key", "")).strip() not in answered_keys
+            ]
             self._set_questions(base_questions, extras_questions)
+            self._prefill_answers_from_questions(base_questions, extras_questions)
 
             draft = result.get("draft")
             if isinstance(draft, dict):

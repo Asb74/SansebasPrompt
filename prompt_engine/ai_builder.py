@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import sys
 from typing import Any
 
 
 _ALLOWED_KINDS = {"perfil", "contexto", "plantilla"}
+
+
+def resource_path(relative_path: str) -> Path:
+    base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base_path / relative_path
 
 
 def _strip_text(value: Any) -> str:
@@ -138,6 +145,22 @@ def _normalize(kind: str, payload: dict[str, Any], name: str) -> dict[str, Any]:
     return _normalize_plantilla(payload, name)
 
 
+def _load_api_key() -> str:
+    env_key = _strip_text(os.getenv("OPENAI_API_KEY"))
+    if env_key:
+        return env_key
+
+    key_file = resource_path("prompt_engine/KeySecret.txt")
+    if key_file.exists():
+        file_key = key_file.read_text(encoding="utf-8").strip()
+        if file_key:
+            return file_key
+
+    raise RuntimeError(
+        "Falta API key de OpenAI. Define OPENAI_API_KEY o crea prompt_engine/KeySecret.txt con la clave."
+    )
+
+
 def _system_prompt(kind: str, name: str) -> str:
     schemas = {
         "perfil": """Devuelve SOLO un JSON con este esquema exacto:
@@ -200,9 +223,7 @@ def generate_master(kind: str, name: str, description: str) -> dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError("OpenAI no instalado. Instala el paquete 'openai' para usar el Asistente IA.") from exc
 
-    api_key = _strip_text(os.getenv("OPENAI_API_KEY"))
-    if not api_key:
-        raise RuntimeError("Falta OPENAI_API_KEY en variables de entorno.")
+    api_key = _load_api_key()
 
     client = OpenAI(api_key=api_key)
     response = client.chat.completions.create(

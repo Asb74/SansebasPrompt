@@ -853,6 +853,7 @@ class AsistenteIADialog(tk.Toplevel):
             state="readonly",
         )
         self.kind_combo.grid(row=0, column=1, sticky="ew", pady=4)
+        self.kind_combo.bind("<<ComboboxSelected>>", self._on_kind_changed)
 
         ttk.Label(frame, text="Nombre").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Entry(frame, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", pady=4)
@@ -897,6 +898,23 @@ class AsistenteIADialog(tk.Toplevel):
         ttk.Button(footer, text="Aplicar al formulario", command=self._on_apply).pack(side="right", padx=(6, 0))
         ttk.Button(footer, text="Guardar en maestros", command=self._on_save).pack(side="right", padx=(6, 0))
         ttk.Button(footer, text="Cerrar", command=self.destroy).pack(side="right", padx=(6, 0))
+
+    @staticmethod
+    def _clear_text_widget(widget: ScrolledText, readonly: bool = False) -> None:
+        if readonly:
+            widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        if readonly:
+            widget.configure(state="disabled")
+
+    def _on_kind_changed(self, _event: tk.Event | None = None) -> None:
+        self._clear_text_widget(self.questions_text, readonly=True)
+        self._clear_text_widget(self.answers_text)
+        self._set_preview(None)
+        self.generated_data = None
+        self.diagnosis_data = None
+        self.status_var.set("Listo")
+        self.generate_master_button.configure(state="disabled")
 
     def _set_questions(self, questions: list[dict[str, object]]) -> None:
         self.questions_text.configure(state="normal")
@@ -946,6 +964,7 @@ class AsistenteIADialog(tk.Toplevel):
             messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
             return
 
+        self.diagnosis_data = None
         self.diagnose_button.configure(state="disabled")
         self.generate_master_button.configure(state="disabled")
         self.status_var.set("Diagnosticando…")
@@ -983,7 +1002,6 @@ class AsistenteIADialog(tk.Toplevel):
             self.after(80, self._poll_diagnosis)
             return
 
-        self.diagnose_button.configure(state="normal")
         try:
             result = self._future.result()
             if not isinstance(result, dict):
@@ -1002,11 +1020,16 @@ class AsistenteIADialog(tk.Toplevel):
             self.status_var.set("Diagnóstico completado")
         except RuntimeError as exc:
             self.status_var.set("Error")
+            if not isinstance(self.diagnosis_data, dict):
+                self.generate_master_button.configure(state="disabled")
             messagebox.showerror("Asistente IA", str(exc), parent=self)
         except Exception as exc:
             self.status_var.set("Error")
+            if not isinstance(self.diagnosis_data, dict):
+                self.generate_master_button.configure(state="disabled")
             messagebox.showerror("Asistente IA", f"Error inesperado al diagnosticar: {exc}", parent=self)
         finally:
+            self.diagnose_button.configure(state="normal")
             self._future = None
 
     def _poll_generation(self) -> None:
@@ -1016,8 +1039,6 @@ class AsistenteIADialog(tk.Toplevel):
             self.after(80, self._poll_generation)
             return
 
-        self.diagnose_button.configure(state="normal")
-        self.generate_master_button.configure(state="normal")
         try:
             result = self._future.result()
             if not isinstance(result, dict):
@@ -1033,6 +1054,8 @@ class AsistenteIADialog(tk.Toplevel):
             self.status_var.set("Error")
             messagebox.showerror("Asistente IA", f"Error inesperado al generar: {exc}", parent=self)
         finally:
+            self.diagnose_button.configure(state="normal")
+            self.generate_master_button.configure(state="normal")
             self._future = None
 
     def _on_apply(self) -> None:

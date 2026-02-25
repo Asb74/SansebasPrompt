@@ -15,7 +15,7 @@ from tkinter.scrolledtext import ScrolledText
 from .widgets import DictationField
 
 from .app_paths import ensure_user_dirs, get_db_path, get_templates_dir
-from .ai_builder import generate_master
+from .ai_builder import generate_master_diagnosis, generate_master_with_answers
 from .attachments import validar_tipo_archivo
 from .database import init_db
 from .motor import generar_prompt
@@ -833,6 +833,7 @@ class AsistenteIADialog(tk.Toplevel):
         self.grab_set()
 
         self.generated_data: dict[str, object] | None = None
+        self.diagnosis_data: dict[str, object] | None = None
         self._future = None
 
         self.kind_var = tk.StringVar(value="Perfil")
@@ -842,7 +843,7 @@ class AsistenteIADialog(tk.Toplevel):
         frame = ttk.Frame(self, padding=12)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(1, weight=1)
-        frame.rowconfigure(3, weight=1)
+        frame.rowconfigure(4, weight=1)
 
         ttk.Label(frame, text="Tipo de maestro").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
         self.kind_combo = ttk.Combobox(
@@ -852,6 +853,7 @@ class AsistenteIADialog(tk.Toplevel):
             state="readonly",
         )
         self.kind_combo.grid(row=0, column=1, sticky="ew", pady=4)
+        self.kind_combo.bind("<<ComboboxSelected>>", self._on_kind_changed)
 
         ttk.Label(frame, text="Nombre").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Entry(frame, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", pady=4)
@@ -860,8 +862,24 @@ class AsistenteIADialog(tk.Toplevel):
         self.description_text = ScrolledText(frame, wrap="word", height=9)
         self.description_text.grid(row=2, column=1, sticky="nsew", pady=4)
 
+        qa_frame = ttk.LabelFrame(frame, text="Preguntas (rellena respuestas y vuelve a generar)")
+        qa_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        qa_frame.columnconfigure(0, weight=1)
+        qa_frame.columnconfigure(1, weight=1)
+        qa_frame.rowconfigure(1, weight=1)
+
+        ttk.Label(qa_frame, text="Preguntas").grid(row=0, column=0, sticky="w", padx=(8, 4), pady=(8, 4))
+        ttk.Label(qa_frame, text="Respuestas (clave: valor)").grid(row=0, column=1, sticky="w", padx=(4, 8), pady=(8, 4))
+
+        self.questions_text = ScrolledText(qa_frame, wrap="word", height=6)
+        self.questions_text.grid(row=1, column=0, sticky="nsew", padx=(8, 4), pady=(0, 8))
+        self.questions_text.configure(state="disabled")
+
+        self.answers_text = ScrolledText(qa_frame, wrap="word", height=6)
+        self.answers_text.grid(row=1, column=1, sticky="nsew", padx=(4, 8), pady=(0, 8))
+
         preview_frame = ttk.LabelFrame(frame, text="Vista previa JSON")
-        preview_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        preview_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(0, weight=1)
 
@@ -870,13 +888,61 @@ class AsistenteIADialog(tk.Toplevel):
         self.preview_text.configure(state="disabled")
 
         footer = ttk.Frame(frame)
-        footer.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        footer.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         ttk.Label(footer, textvariable=self.status_var).pack(side="left")
-        self.generate_button = ttk.Button(footer, text="Generar", command=self._on_generate)
-        self.generate_button.pack(side="right", padx=(6, 0))
+        self.generate_master_button = ttk.Button(footer, text="Generar maestro", command=self._on_generate_master)
+        self.generate_master_button.pack(side="right", padx=(6, 0))
+        self.generate_master_button.configure(state="disabled")
+        self.diagnose_button = ttk.Button(footer, text="Diagnosticar", command=self._on_diagnose)
+        self.diagnose_button.pack(side="right", padx=(6, 0))
         ttk.Button(footer, text="Aplicar al formulario", command=self._on_apply).pack(side="right", padx=(6, 0))
         ttk.Button(footer, text="Guardar en maestros", command=self._on_save).pack(side="right", padx=(6, 0))
         ttk.Button(footer, text="Cerrar", command=self.destroy).pack(side="right", padx=(6, 0))
+
+    @staticmethod
+    def _clear_text_widget(widget: ScrolledText, readonly: bool = False) -> None:
+        if readonly:
+            widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        if readonly:
+            widget.configure(state="disabled")
+
+    def _on_kind_changed(self, _event: tk.Event | None = None) -> None:
+        self._clear_text_widget(self.questions_text, readonly=True)
+        self._clear_text_widget(self.answers_text)
+        self._set_preview(None)
+        self.generated_data = None
+        self.diagnosis_data = None
+        self.status_var.set("Listo")
+        self.generate_master_button.configure(state="disabled")
+
+    def _set_questions(self, questions: list[dict[str, object]]) -> None:
+        self.questions_text.configure(state="normal")
+        self.questions_text.delete("1.0", "end")
+        lines: list[str] = []
+        for idx, question in enumerate(questions, start=1):
+            key = str(question.get("key", "")).strip()
+            text = str(question.get("question", "")).strip()
+            required = bool(question.get("required", False))
+            suffix = " [requerida]" if required else ""
+            if key and text:
+                lines.append(f"{idx}. ({key}) {text}{suffix}")
+        if lines:
+            self.questions_text.insert("1.0", "\n".join(lines))
+        self.questions_text.configure(state="disabled")
+
+    @staticmethod
+    def _parse_answers(raw: str) -> dict[str, str]:
+        parsed: dict[str, str] = {}
+        for line in raw.splitlines():
+            clean = line.strip()
+            if not clean or ":" not in clean:
+                continue
+            key, value = clean.split(":", 1)
+            clean_key = key.strip()
+            if clean_key:
+                parsed[clean_key] = value.strip()
+        return parsed
 
     def _set_preview(self, payload: dict[str, object] | None) -> None:
         self.preview_text.configure(state="normal")
@@ -888,7 +954,7 @@ class AsistenteIADialog(tk.Toplevel):
     def _kind_key(self) -> str:
         return self.kind_var.get().strip().lower()
 
-    def _on_generate(self) -> None:
+    def _on_diagnose(self) -> None:
         name = self.name_var.get().strip()
         description = self.description_text.get("1.0", "end").strip()
         if not name:
@@ -898,10 +964,73 @@ class AsistenteIADialog(tk.Toplevel):
             messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
             return
 
-        self.generate_button.configure(state="disabled")
-        self.status_var.set("Generando…")
-        self._future = self.ui.executor.submit(generate_master, self._kind_key(), name, description)
+        self.diagnosis_data = None
+        self.diagnose_button.configure(state="disabled")
+        self.generate_master_button.configure(state="disabled")
+        self.status_var.set("Diagnosticando…")
+        self._future = self.ui.executor.submit(generate_master_diagnosis, self._kind_key(), name, description)
+        self.after(80, self._poll_diagnosis)
+
+    def _on_generate_master(self) -> None:
+        name = self.name_var.get().strip()
+        description = self.description_text.get("1.0", "end").strip()
+        answers = self._parse_answers(self.answers_text.get("1.0", "end"))
+
+        if not name:
+            messagebox.showwarning("Asistente IA", "El nombre es obligatorio.", parent=self)
+            return
+        if not description:
+            messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
+            return
+
+        self.diagnose_button.configure(state="disabled")
+        self.generate_master_button.configure(state="disabled")
+        self.status_var.set("Generando maestro…")
+        self._future = self.ui.executor.submit(
+            generate_master_with_answers,
+            self._kind_key(),
+            name,
+            description,
+            answers,
+        )
         self.after(80, self._poll_generation)
+
+    def _poll_diagnosis(self) -> None:
+        if self._future is None:
+            return
+        if not self._future.done():
+            self.after(80, self._poll_diagnosis)
+            return
+
+        try:
+            result = self._future.result()
+            if not isinstance(result, dict):
+                raise RuntimeError("El diagnóstico devolvió un formato inválido.")
+            self.diagnosis_data = result
+            questions = result.get("preguntas") if isinstance(result.get("preguntas"), list) else []
+            self._set_questions(questions)
+
+            draft = result.get("draft")
+            if isinstance(draft, dict):
+                self.generated_data = draft
+                self.name_var.set(str(draft.get("nombre", self.name_var.get())).strip())
+                self._set_preview(draft)
+
+            self.generate_master_button.configure(state="normal")
+            self.status_var.set("Diagnóstico completado")
+        except RuntimeError as exc:
+            self.status_var.set("Error")
+            if not isinstance(self.diagnosis_data, dict):
+                self.generate_master_button.configure(state="disabled")
+            messagebox.showerror("Asistente IA", str(exc), parent=self)
+        except Exception as exc:
+            self.status_var.set("Error")
+            if not isinstance(self.diagnosis_data, dict):
+                self.generate_master_button.configure(state="disabled")
+            messagebox.showerror("Asistente IA", f"Error inesperado al diagnosticar: {exc}", parent=self)
+        finally:
+            self.diagnose_button.configure(state="normal")
+            self._future = None
 
     def _poll_generation(self) -> None:
         if self._future is None:
@@ -910,7 +1039,6 @@ class AsistenteIADialog(tk.Toplevel):
             self.after(80, self._poll_generation)
             return
 
-        self.generate_button.configure(state="normal")
         try:
             result = self._future.result()
             if not isinstance(result, dict):
@@ -926,6 +1054,8 @@ class AsistenteIADialog(tk.Toplevel):
             self.status_var.set("Error")
             messagebox.showerror("Asistente IA", f"Error inesperado al generar: {exc}", parent=self)
         finally:
+            self.diagnose_button.configure(state="normal")
+            self.generate_master_button.configure(state="normal")
             self._future = None
 
     def _on_apply(self) -> None:

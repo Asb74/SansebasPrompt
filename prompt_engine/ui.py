@@ -2397,18 +2397,28 @@ class PromptEngineUI:
             return False
 
         if kind == "perfil":
-            existing = self._selected_item(self.perfiles, nombre)
+            perfiles = get_perfiles()
+            existing = self._selected_item(perfiles, nombre)
             if existing and not messagebox.askyesno(
                 "Asistente IA",
                 f"El perfil '{nombre}' ya existe. ¿Deseas sobrescribirlo?",
                 parent=parent,
             ):
                 return False
-            if existing:
-                if not update_perfil(nombre, payload):
-                    insert_perfil(payload)
-            else:
-                insert_perfil(payload)
+
+            updated_perfiles: list[dict[str, object]] = []
+            replaced = False
+            for perfil in perfiles:
+                if str(perfil.get("nombre", "")).strip() == nombre:
+                    updated_perfiles.append(dict(payload))
+                    replaced = True
+                else:
+                    updated_perfiles.append(perfil)
+            if not replaced:
+                updated_perfiles.append(dict(payload))
+
+            guardar_perfiles(updated_perfiles)
+            self.perfiles = get_perfiles()
 
         elif kind == "contexto":
             existing = self._selected_item(self.contextos, nombre)
@@ -2455,6 +2465,16 @@ class PromptEngineUI:
             return False
 
         self._refresh_data_sources()
+        if kind == "perfil":
+            self.perfil_var.set(nombre)
+            self._on_profile_change()
+        elif kind == "contexto":
+            self.contexto_var.set(nombre)
+            self._on_context_change()
+        elif kind == "plantilla":
+            self.template_var.set(nombre)
+            self._on_template_changed()
+
         labels = {"perfil": "Perfil", "contexto": "Contexto", "plantilla": "Plantilla"}
         messagebox.showinfo("Asistente IA", f"{labels.get(kind, kind)} guardado correctamente.", parent=parent)
         return True

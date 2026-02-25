@@ -201,6 +201,8 @@ def _system_prompt(kind: str, name: str) -> str:
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
         "Responde únicamente JSON válido, sin markdown, sin comentarios, sin texto adicional. "
+        "No inventes datos de identidad (por ejemplo empresa, ubicación, nombres de clientes, país o ciudad). "
+        "Si la descripción no aporta explícitamente un dato, devuelve \"\" en ese campo. "
         f"El tipo de maestro es: {kind}. Nombre esperado: {name}.\n\n{schemas[kind]}"
     )
 

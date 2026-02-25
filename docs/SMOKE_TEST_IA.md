@@ -22,3 +22,19 @@
    - Lanzar sin `OPENAI_API_KEY` y verificar error claro.
 10. Caso sin dependencia `openai`:
     - Simular entorno sin paquete y verificar error claro sin cierre inesperado.
+
+
+## Smoke test breve del flujo guiado (nuevo)
+
+1. En **Asistente IA**, elegir **Profundidad: Profundo** y completar Nombre + Descripción con dictado (🎤).
+2. Pulsar **Diagnosticar** y verificar:
+   - aparecen preguntas,
+   - se habilita **Generar maestro**,
+   - se muestra `draft` en vista previa.
+3. En respuestas, escribir por ejemplo:
+   - `herramientas: Jira;Slack`
+   - `prioridades: ["calidad","tiempo"]`
+   - `empresa: ACME`
+   y pulsar **Refinar**.
+4. Verificar que **Memoria confirmada** muestra el diccionario acumulado y que no se bloquean botones si ocurre error.
+5. Pulsar **Generar maestro** y confirmar JSON final estricto en vista previa.

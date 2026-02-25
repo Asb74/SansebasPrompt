@@ -183,7 +183,20 @@ def _normalize_draft_lenient(kind: str, draft: dict[str, Any], name: str) -> dic
     }
 
 
-def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str) -> dict[str, Any]:
+def _normalize_slots(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    valid_states = {"known", "missing", "unclear"}
+    normalized: dict[str, str] = {}
+    for key, state in value.items():
+        clean_key = _strip_text(key)
+        clean_state = _strip_text(state).lower()
+        if clean_key and clean_state in valid_states:
+            normalized[clean_key] = clean_state
+    return normalized
+
+
+def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str, max_questions: int) -> dict[str, Any]:
     preguntas_raw = payload.get("preguntas")
     preguntas: list[dict[str, Any]] = []
     if isinstance(preguntas_raw, list):
@@ -195,12 +208,14 @@ def _normalize_diagnosis(kind: str, payload: dict[str, Any], name: str) -> dict[
             if not key or not question:
                 continue
             required = bool(item.get("required", False))
-            preguntas.append({"key": key, "question": question, "required": required})
-    preguntas = preguntas[:8]
+            why = _strip_text(item.get("why"))
+            preguntas.append({"key": key, "question": question, "required": required, "why": why})
+    preguntas = preguntas[:max(1, min(max_questions, 20))]
 
     normalized = {
         "nombre": _strip_text(payload.get("nombre")) or name,
         "kind": kind,
+        "slots": _normalize_slots(payload.get("slots")),
         "preguntas": preguntas,
         "extras_fields_sugeridos": _as_fields_list(payload.get("extras_fields_sugeridos")),
         "draft": _normalize_draft_lenient(
@@ -274,19 +289,21 @@ def _system_prompt(kind: str, name: str) -> str:
     )
 
 
-def _diagnosis_system_prompt(kind: str, name: str) -> str:
+def _diagnosis_system_prompt(kind: str, name: str, depth: int, max_questions: int) -> str:
     return (
         "Eres un asistente experto en diseño de maestros para PROM-9. "
         "Devuelve SOLO JSON del esquema diagnosis; no markdown; no texto; no inventes; si falta info, pregunta. "
         "No inventes datos de identidad (empresa, ubicación, personas, clientes). "
-        "Genera como máximo 8 preguntas, priorizando calidad del maestro. "
+        f"Genera como máximo {max_questions} preguntas, priorizando calidad del maestro. "
+        f"Profundidad solicitada: {depth} (1=rápido, 2=normal, 3=profundo). "
         "Usa keys simples y estables en snake_case. "
         f"Tipo: {kind}. Nombre esperado: {name}. "
         "Esquema exacto: "
         "{"
         '"nombre":"...",'
         '"kind":"perfil|contexto|plantilla",'
-        '"preguntas":[{"key":"...","question":"...","required":false}],'
+        '"slots":{"campo":"known|missing|unclear"},'
+        '"preguntas":[{"key":"...","question":"...","required":false,"why":"..."}],'
         '"extras_fields_sugeridos":[{"key":"...","label":"...","help":"...","example":"...","default":""}],'
         '"draft":{...}'
         "}. "
@@ -332,7 +349,15 @@ def _request_json(system_prompt: str, user_prompt: str) -> dict[str, Any]:
     return _extract_json(raw_content)
 
 
-def generate_master_diagnosis(kind: str, name: str, description: str) -> dict[str, Any]:
+def generate_master_diagnosis(
+    kind: str,
+    name: str,
+    description: str,
+    memory: dict[str, Any] | None = None,
+    depth: int = 2,
+    max_questions: int = 8,
+    ui_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     normalized_kind = _strip_text(kind).lower()
     normalized_name = _strip_text(name)
     normalized_description = _strip_text(description)
@@ -344,21 +369,32 @@ def generate_master_diagnosis(kind: str, name: str, description: str) -> dict[st
     if not normalized_description:
         raise RuntimeError("La descripción es obligatoria para diagnosticar con IA.")
 
+    clean_memory = memory if isinstance(memory, dict) else {}
+    clean_ui_context = ui_context if isinstance(ui_context, dict) else {}
+    safe_depth = max(1, min(int(depth), 3))
+    safe_max_questions = max(1, min(int(max_questions), 20))
+
     payload = _request_json(
-        _diagnosis_system_prompt(normalized_kind, normalized_name),
+        _diagnosis_system_prompt(normalized_kind, normalized_name, safe_depth, safe_max_questions),
         (
             f"Diagnostica el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
-            f"Descripción funcional: {normalized_description}"
+            f"Descripción funcional: {normalized_description}. "
+            "Memoria confirmada (respuestas acumuladas): "
+            f"{json.dumps(clean_memory, ensure_ascii=False)}. "
+            "Contexto activo de la UI (perfil/contexto/plantilla): "
+            f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
     )
-    return _normalize_diagnosis(normalized_kind, payload, normalized_name)
+    return _normalize_diagnosis(normalized_kind, payload, normalized_name, safe_max_questions)
 
 
 def generate_master_with_answers(
     kind: str,
     name: str,
     description: str,
-    answers: dict[str, str],
+    memory: dict[str, Any] | None = None,
+    answers: dict[str, Any] | None = None,
+    ui_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_kind = _strip_text(kind).lower()
     normalized_name = _strip_text(name)
@@ -371,19 +407,35 @@ def generate_master_with_answers(
     if not normalized_description:
         raise RuntimeError("La descripción es obligatoria para generar con IA.")
 
-    clean_answers: dict[str, str] = {}
-    for key, value in answers.items():
+    if answers is None:
+        answers = memory if isinstance(memory, dict) else {}
+        memory = {}
+
+    clean_answers: dict[str, Any] = {}
+    for key, value in (answers or {}).items():
         clean_key = _strip_text(key)
         if clean_key:
-            clean_answers[clean_key] = _strip_text(value)
+            clean_answers[clean_key] = value
+
+    clean_memory: dict[str, Any] = {}
+    for key, value in (memory or {}).items():
+        clean_key = _strip_text(key)
+        if clean_key:
+            clean_memory[clean_key] = value
+
+    clean_ui_context = ui_context if isinstance(ui_context, dict) else {}
 
     payload = _request_json(
         _final_system_prompt(normalized_kind, normalized_name),
         (
             f"Genera el maestro tipo {normalized_kind} con nombre '{normalized_name}'. "
             f"Descripción funcional: {normalized_description}. "
+            "Usa memoria confirmada previa: "
+            f"{json.dumps(clean_memory, ensure_ascii=False)}. "
             "Usa estas respuestas del usuario para completar faltantes: "
-            f"{json.dumps(clean_answers, ensure_ascii=False)}"
+            f"{json.dumps(clean_answers, ensure_ascii=False)}. "
+            "Contexto activo de la UI (perfil/contexto/plantilla): "
+            f"{json.dumps(clean_ui_context, ensure_ascii=False)}"
         ),
     )
     normalized = _normalize(normalized_kind, payload, normalized_name)

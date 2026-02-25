@@ -2206,7 +2206,7 @@ class PromptEngineUI:
         return get_templates_dir() / f"{template_name}.py"
 
     def _ensure_template_py_exists(self, nombre: str) -> None:
-        path = get_templates_dir() / f"{nombre}.py"
+        path = self._template_path(nombre)
         if path.exists():
             return
         stub = (

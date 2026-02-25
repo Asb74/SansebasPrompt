@@ -15,6 +15,7 @@ from tkinter.scrolledtext import ScrolledText
 from .widgets import DictationField
 
 from .app_paths import ensure_user_dirs, get_db_path, get_templates_dir
+from .ai_builder import generate_master
 from .attachments import validar_tipo_archivo
 from .database import init_db
 from .motor import generar_prompt
@@ -821,6 +822,131 @@ class TemplateEditorDialog(tk.Toplevel):
         return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
+class AsistenteIADialog(tk.Toplevel):
+    def __init__(self, ui: "PromptEngineUI") -> None:
+        super().__init__(ui.root)
+        _set_app_icon(self)
+        self.ui = ui
+        self.title("Asistente IA")
+        self.geometry("760x640")
+        self.transient(ui.root)
+        self.grab_set()
+
+        self.generated_data: dict[str, object] | None = None
+        self._future = None
+
+        self.kind_var = tk.StringVar(value="Perfil")
+        self.name_var = tk.StringVar()
+        self.status_var = tk.StringVar(value="Listo")
+
+        frame = ttk.Frame(self, padding=12)
+        frame.pack(fill="both", expand=True)
+        frame.columnconfigure(1, weight=1)
+        frame.rowconfigure(3, weight=1)
+
+        ttk.Label(frame, text="Tipo de maestro").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        self.kind_combo = ttk.Combobox(
+            frame,
+            values=["Perfil", "Contexto", "Plantilla"],
+            textvariable=self.kind_var,
+            state="readonly",
+        )
+        self.kind_combo.grid(row=0, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Nombre").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Entry(frame, textvariable=self.name_var).grid(row=1, column=1, sticky="ew", pady=4)
+
+        ttk.Label(frame, text="Descripción").grid(row=2, column=0, sticky="nw", padx=(0, 8), pady=4)
+        self.description_text = ScrolledText(frame, wrap="word", height=9)
+        self.description_text.grid(row=2, column=1, sticky="nsew", pady=4)
+
+        preview_frame = ttk.LabelFrame(frame, text="Vista previa JSON")
+        preview_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
+        preview_frame.columnconfigure(0, weight=1)
+        preview_frame.rowconfigure(0, weight=1)
+
+        self.preview_text = ScrolledText(preview_frame, wrap="word", height=12)
+        self.preview_text.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
+        self.preview_text.configure(state="disabled")
+
+        footer = ttk.Frame(frame)
+        footer.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ttk.Label(footer, textvariable=self.status_var).pack(side="left")
+        self.generate_button = ttk.Button(footer, text="Generar", command=self._on_generate)
+        self.generate_button.pack(side="right", padx=(6, 0))
+        ttk.Button(footer, text="Aplicar al formulario", command=self._on_apply).pack(side="right", padx=(6, 0))
+        ttk.Button(footer, text="Guardar en maestros", command=self._on_save).pack(side="right", padx=(6, 0))
+        ttk.Button(footer, text="Cerrar", command=self.destroy).pack(side="right", padx=(6, 0))
+
+    def _set_preview(self, payload: dict[str, object] | None) -> None:
+        self.preview_text.configure(state="normal")
+        self.preview_text.delete("1.0", "end")
+        if payload is not None:
+            self.preview_text.insert("1.0", json.dumps(payload, ensure_ascii=False, indent=2))
+        self.preview_text.configure(state="disabled")
+
+    def _kind_key(self) -> str:
+        return self.kind_var.get().strip().lower()
+
+    def _on_generate(self) -> None:
+        name = self.name_var.get().strip()
+        description = self.description_text.get("1.0", "end").strip()
+        if not name:
+            messagebox.showwarning("Asistente IA", "El nombre es obligatorio.", parent=self)
+            return
+        if not description:
+            messagebox.showwarning("Asistente IA", "La descripción es obligatoria.", parent=self)
+            return
+
+        self.generate_button.configure(state="disabled")
+        self.status_var.set("Generando…")
+        self._future = self.ui.executor.submit(generate_master, self._kind_key(), name, description)
+        self.after(80, self._poll_generation)
+
+    def _poll_generation(self) -> None:
+        if self._future is None:
+            return
+        if not self._future.done():
+            self.after(80, self._poll_generation)
+            return
+
+        self.generate_button.configure(state="normal")
+        try:
+            result = self._future.result()
+            if not isinstance(result, dict):
+                raise RuntimeError("La generación devolvió un formato inválido.")
+            self.generated_data = result
+            self.name_var.set(str(result.get("nombre", self.name_var.get())).strip())
+            self._set_preview(self.generated_data)
+            self.status_var.set("Generación completada")
+        except RuntimeError as exc:
+            self.status_var.set("Error")
+            messagebox.showerror("Asistente IA", str(exc), parent=self)
+        except Exception as exc:
+            self.status_var.set("Error")
+            messagebox.showerror("Asistente IA", f"Error inesperado al generar: {exc}", parent=self)
+        finally:
+            self._future = None
+
+    def _on_apply(self) -> None:
+        if not self.generated_data:
+            messagebox.showinfo("Asistente IA", "Primero debes generar un JSON.", parent=self)
+            return
+        applied = self.ui._apply_ai_master_to_form(self._kind_key(), dict(self.generated_data))
+        if applied:
+            self.generated_data = applied
+            self.name_var.set(str(applied.get("nombre", self.name_var.get())).strip())
+            self._set_preview(self.generated_data)
+
+    def _on_save(self) -> None:
+        if not self.generated_data:
+            messagebox.showinfo("Asistente IA", "Primero debes generar un JSON.", parent=self)
+            return
+        saved = self.ui._save_ai_master(self._kind_key(), dict(self.generated_data), parent=self)
+        if saved:
+            self.status_var.set("Guardado")
+
+
 class HistoryWindow(tk.Toplevel):
     """Ventana de historial de tareas con acciones."""
 
@@ -971,6 +1097,8 @@ class PromptEngineUI:
         herramientas = tk.Menu(menubar, tearoff=False)
         herramientas.add_command(label="Importar…", command=self.importar_maestros_csv)
         herramientas.add_command(label="Exportar…", command=self.exportar_maestros_csv)
+        herramientas.add_separator()
+        herramientas.add_command(label="Asistente IA…", command=self.asistente_ia)
         menubar.add_cascade(label="Herramientas", menu=herramientas)
 
         self.root.config(menu=menubar)
@@ -2205,11 +2333,9 @@ class PromptEngineUI:
     def _template_path(self, template_name: str) -> Path:
         return get_templates_dir() / f"{template_name}.py"
 
-    def _ensure_template_py_exists(self, nombre: str) -> None:
-        path = self._template_path(nombre)
-        if path.exists():
-            return
-        stub = (
+    @staticmethod
+    def _template_stub_content() -> str:
+        return (
             '"""Plantilla personalizada PROM-9™."""\n\n'
             "from __future__ import annotations\n\n"
             "from typing import Dict\n\n"
@@ -2217,7 +2343,121 @@ class PromptEngineUI:
             "def render_custom(payload: Dict[str, str]) -> str:\n"
             "    return render_base(payload)\n"
         )
-        path.write_text(stub, encoding="utf-8")
+
+    def _ensure_template_py_exists(self, nombre: str) -> None:
+        get_templates_dir().mkdir(parents=True, exist_ok=True)
+        path = self._template_path(nombre)
+        if path.exists():
+            return
+        path.write_text(self._template_stub_content(), encoding="utf-8")
+
+    def asistente_ia(self) -> None:
+        dialog = AsistenteIADialog(self)
+        self.root.wait_window(dialog)
+
+    def _apply_ai_master_to_form(self, kind: str, payload: dict[str, object]) -> dict[str, object] | None:
+        if kind == "perfil":
+            modal = ProfileEditorDialog(self.root, payload)
+            self.root.wait_window(modal)
+            if modal.result:
+                return modal.result
+            return None
+
+        if kind == "contexto":
+            modal = ContextEditorDialog(self.root, payload)
+            self.root.wait_window(modal)
+            if modal.result:
+                return modal.result
+            return None
+
+        template_name = str(payload.get("nombre", "")).strip()
+        content = str(payload.get("content", "")).strip() or self._template_stub_content()
+        template_data = {
+            "nombre": template_name,
+            "label": str(payload.get("label", "")).strip(),
+            "fields": payload.get("fields", []),
+            "ejemplos": payload.get("ejemplos", []),
+        }
+        modal = TemplateEditorDialog(self.root, template_data, content)
+        self.root.wait_window(modal)
+        if not modal.result:
+            return None
+        return {
+            "nombre": template_name,
+            "label": str(modal.result.get("label", "")).strip(),
+            "fields": modal.result.get("fields", []),
+            "ejemplos": modal.result.get("ejemplos", []),
+            "content": str(modal.result.get("content", "")),
+        }
+
+    def _save_ai_master(self, kind: str, payload: dict[str, object], parent: tk.Widget | None = None) -> bool:
+        nombre = str(payload.get("nombre", "")).strip()
+        if not nombre:
+            messagebox.showwarning("Asistente IA", "El nombre es obligatorio para guardar.", parent=parent)
+            return False
+
+        if kind == "perfil":
+            existing = self._selected_item(self.perfiles, nombre)
+            if existing and not messagebox.askyesno(
+                "Asistente IA",
+                f"El perfil '{nombre}' ya existe. ¿Deseas sobrescribirlo?",
+                parent=parent,
+            ):
+                return False
+            if existing:
+                if not update_perfil(nombre, payload):
+                    insert_perfil(payload)
+            else:
+                insert_perfil(payload)
+
+        elif kind == "contexto":
+            existing = self._selected_item(self.contextos, nombre)
+            if existing and not messagebox.askyesno(
+                "Asistente IA",
+                f"El contexto '{nombre}' ya existe. ¿Deseas sobrescribirlo?",
+                parent=parent,
+            ):
+                return False
+            if existing:
+                if not update_contexto(nombre, payload):
+                    insert_contexto(payload)
+            else:
+                insert_contexto(payload)
+
+        elif kind == "plantilla":
+            existing = self._selected_item(self.plantillas, nombre)
+            if existing and not messagebox.askyesno(
+                "Asistente IA",
+                f"La plantilla '{nombre}' ya existe. ¿Deseas sobrescribirla?",
+                parent=parent,
+            ):
+                return False
+
+            plantilla_payload = {
+                "nombre": nombre,
+                "label": str(payload.get("label", "")).strip(),
+                "fields": payload.get("fields", []),
+                "ejemplos": payload.get("ejemplos", []),
+            }
+            if existing:
+                if not update_plantilla(nombre, plantilla_payload):
+                    upsert_plantilla(plantilla_payload)
+            else:
+                upsert_plantilla(plantilla_payload)
+
+            content = str(payload.get("content", ""))
+            if content.strip():
+                self._template_path(nombre).write_text(content, encoding="utf-8")
+            else:
+                self._ensure_template_py_exists(nombre)
+        else:
+            messagebox.showerror("Asistente IA", "Tipo de maestro inválido.", parent=parent)
+            return False
+
+        self._refresh_data_sources()
+        labels = {"perfil": "Perfil", "contexto": "Contexto", "plantilla": "Plantilla"}
+        messagebox.showinfo("Asistente IA", f"{labels.get(kind, kind)} guardado correctamente.", parent=parent)
+        return True
 
     def new_template(self) -> None:
         template_name = simpledialog.askstring("Nueva Plantilla", "Nombre de plantilla (sin .py):", parent=self.root)

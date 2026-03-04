@@ -168,7 +168,7 @@ def generar_prompt(
         "contexto_nombre": contexto.get("nombre", "General"),
         "contexto_rol": contexto.get("rol_contextual", "Asistente"),
         "titulo": datos_tarea.get("titulo", ""),
-        "situacion": datos_tarea.get("situacion", datos_tarea.get("entradas", "")),
+        "situacion": datos_tarea.get("situacion", ""),
         "urgencia": datos_tarea.get("urgencia", ""),
         "contexto_detallado": datos_tarea.get("contexto_detallado", ""),
         "objetivo": datos_tarea.get("objetivo", ""),

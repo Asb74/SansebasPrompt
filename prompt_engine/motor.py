@@ -77,14 +77,14 @@ def _render_template_fields_block(payload: Dict[str, Any], template_name: str) -
         if not key:
             continue
         value = payload.get(key)
-        if not _incluir_valor_campo(value):
-            continue
-        value_text = value.strip() if isinstance(value, str) else str(value)
+        if isinstance(value, str):
+            value_text = value.strip()
+        elif value is None:
+            value_text = ""
+        else:
+            value_text = str(value)
         label = str(field.get("label") or key)
         lineas.append(f"- {label}: {value_text}")
-
-    if not lineas:
-        return ""
 
     return f"\n[Campos de plantilla: {template_name}]\n" + "\n".join(lineas) + "\n"
 
@@ -168,14 +168,13 @@ def generar_prompt(
         "contexto_nombre": contexto.get("nombre", "General"),
         "contexto_rol": contexto.get("rol_contextual", "Asistente"),
         "titulo": datos_tarea.get("titulo", ""),
-        "situacion": datos_tarea.get("situacion", ""),
+        "situacion": datos_tarea.get("situacion", datos_tarea.get("entradas", "")),
         "urgencia": datos_tarea.get("urgencia", ""),
         "contexto_detallado": datos_tarea.get("contexto_detallado", ""),
         "objetivo": datos_tarea.get("objetivo", ""),
-        "entradas": datos_tarea.get("entradas", ""),
         "restricciones": datos_tarea.get("restricciones", ""),
         "formato_salida": datos_tarea.get("formato_salida", ""),
-        "prioridad": datos_tarea.get("prioridad", "Media"),
+        "prioridad": datos_tarea.get("prioridad", ""),
     }
 
     extras_filtrados: dict[str, str] = {}
@@ -216,6 +215,18 @@ def generar_prompt(
     if contexto_extras_filtrados:
         payload["_contexto_extras"] = contexto_extras_filtrados
 
+    if not str(payload.get("formato_salida") or "").strip():
+        payload["formato_salida"] = (
+            extras_filtrados.get("formato_salida")
+            or extras_filtrados.get("formato_entrega")
+            or contexto_extras_filtrados.get("formato_salida")
+            or contexto_extras_filtrados.get("formato_entrega")
+            or "Respuesta estructurada"
+        )
+
+    if not str(payload.get("prioridad") or "").strip():
+        payload["prioridad"] = str(payload.get("urgencia") or "").strip() or "Media"
+
     for key, value in datos_tarea.items():
         if (
             key in payload
@@ -229,7 +240,7 @@ def generar_prompt(
         if value_text:
             payload[key] = value_text
 
-    template_name = _normalizar_area(str(datos_tarea.get("area", ""))) or "gestion"
+    template_name = _normalizar_area(str(datos_tarea.get("area", "")))
     if template_name == "it":
         payload.update(
             {

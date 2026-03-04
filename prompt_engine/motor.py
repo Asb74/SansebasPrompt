@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from .attachments import leer_archivos
-from .plantillas.contabilidad import render_contabilidad
-from .plantillas.gestion import render_gestion
-from .plantillas.it import render_it
-from .plantillas.ventas import render_ventas
+from .plantillas.prom9_base import render_base
+from .storage_sqlite import get_plantillas
 
 DIRECTRICES_TECNICAS_IT = """### Directrices obligatorias de análisis técnico
 
@@ -40,6 +37,122 @@ IT_TEMPLATE_KEYS = [
 def _normalizar_area(area: str) -> str:
     """Normaliza el área para facilitar el enrutamiento de plantilla."""
     return area.strip().lower()
+
+
+def _incluir_valor_campo(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    return True
+
+
+def _render_template_fields_block(payload: Dict[str, Any], template_name: str) -> str:
+    try:
+        plantillas = get_plantillas()
+    except Exception:
+        return ""
+
+    plantilla = next(
+        (
+            item
+            for item in plantillas
+            if isinstance(item, dict)
+            and _normalizar_area(str(item.get("nombre", ""))) == template_name
+        ),
+        None,
+    )
+    if not isinstance(plantilla, dict):
+        return ""
+
+    fields = plantilla.get("fields")
+    if not isinstance(fields, list):
+        return ""
+
+    lineas: list[str] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            continue
+        key = str(field.get("key") or "").strip()
+        if not key:
+            continue
+        value = payload.get(key)
+        if not _incluir_valor_campo(value):
+            continue
+        value_text = value.strip() if isinstance(value, str) else str(value)
+        label = str(field.get("label") or key)
+        lineas.append(f"- {label}: {value_text}")
+
+    if not lineas:
+        return ""
+
+    return f"\n[Campos de plantilla: {template_name}]\n" + "\n".join(lineas) + "\n"
+
+
+def _render_extension_block(payload: Dict[str, Any], template_name: str) -> str:
+    if template_name == "it":
+        extra = f"""\n[Extensión IT]
+- Stack/entorno: {payload.get('stack', 'No especificado')}
+- Nivel técnico esperado: {payload.get('nivel_tecnico', 'Senior')}
+- Consideraciones: seguridad, escalabilidad, mantenibilidad y pruebas.
+- Solicitud adicional: propone pasos de implementación y riesgos técnicos.
+"""
+
+        lineas_it = []
+        for key in IT_TEMPLATE_KEYS:
+            value = payload.get(key)
+            if value is not None and str(value).strip() != "":
+                label = key.replace("_", " ").capitalize()
+                if key == "tipo_sistema":
+                    label = "Tipo de sistema"
+                elif key == "entorno_ejecucion":
+                    label = "Entorno de ejecución"
+                elif key == "datos_persistencia":
+                    label = "Datos y persistencia"
+                elif key == "requisitos_funcionales":
+                    label = "Requisitos funcionales"
+                elif key == "requisitos_no_funcionales":
+                    label = "Requisitos no funcionales"
+                elif key == "criterios_aceptacion":
+                    label = "Criterios de aceptación"
+                elif key == "entregables":
+                    label = "Entregables"
+                elif key == "riesgos_y_mitigacion":
+                    label = "Riesgos y mitigación"
+                elif key == "plan_pruebas":
+                    label = "Plan de pruebas"
+                lineas_it.append(f"- {label}: {value}")
+
+        if lineas_it:
+            extra += "\n[Parámetros IT de la tarea]\n" + "\n".join(lineas_it) + "\n"
+
+        return extra
+
+    if template_name == "ventas":
+        return f"""\n[Extensión Ventas]
+- Segmento objetivo: {payload.get('segmento', 'General')}
+- Propuesta de valor: {payload.get('propuesta_valor', 'No especificada')}
+- KPIs sugeridos: ratio de conversión, ticket medio, tiempo de cierre.
+- Solicitud adicional: redacta argumentos y objeciones con cierre persuasivo.
+"""
+
+    if template_name == "contabilidad":
+        return f"""\n[Extensión Contabilidad]
+- Marco normativo: {payload.get('normativa', 'PGC/NIIF según aplique')}
+- Periodo de análisis: {payload.get('periodo', 'No especificado')}
+- Consideraciones: trazabilidad, conciliación y cumplimiento fiscal.
+- Solicitud adicional: incluye asientos sugeridos y validaciones clave.
+"""
+
+    if template_name == "gestion":
+        return f"""\n[Extensión Gestión]
+- Área operativa: {payload.get('area_operativa', 'No especificada')}
+- Horizonte temporal: {payload.get('horizonte', 'Corto/medio plazo')}
+- Consideraciones: eficiencia, coordinación interáreas y control de riesgos.
+- Solicitud adicional: plantea plan de acción, hitos y responsables.
+"""
+
+    return ""
 
 
 def generar_prompt(
@@ -116,7 +229,7 @@ def generar_prompt(
         if value_text:
             payload[key] = value_text
 
-    template_name = _normalizar_area(datos_tarea.get("area", ""))
+    template_name = _normalizar_area(str(datos_tarea.get("area", ""))) or "gestion"
     if template_name == "it":
         payload.update(
             {
@@ -128,7 +241,6 @@ def generar_prompt(
             value = datos_tarea.get(key)
             if value is not None and str(value).strip():
                 payload[key] = str(value).strip()
-        prompt = render_it(payload)
     elif template_name == "ventas":
         payload.update(
             {
@@ -136,7 +248,6 @@ def generar_prompt(
                 "propuesta_valor": datos_tarea.get("propuesta_valor", ""),
             }
         )
-        prompt = render_ventas(payload)
     elif template_name == "contabilidad":
         payload.update(
             {
@@ -144,7 +255,6 @@ def generar_prompt(
                 "periodo": datos_tarea.get("periodo", ""),
             }
         )
-        prompt = render_contabilidad(payload)
     elif template_name == "gestion":
         payload.update(
             {
@@ -152,16 +262,10 @@ def generar_prompt(
                 "horizonte": datos_tarea.get("horizonte", "Trimestral"),
             }
         )
-        prompt = render_gestion(payload)
-    else:
-        try:
-            module = import_module(f"{__package__}.plantillas.{template_name}")
-            render_fn = getattr(module, "render_custom", None)
-            if not callable(render_fn):
-                render_fn = getattr(module, f"render_{template_name}", None)
-            prompt = render_fn(payload) if callable(render_fn) else render_gestion(payload)
-        except Exception:
-            prompt = render_gestion(payload)
+    base_prompt = render_base(payload)
+    template_fields_block = _render_template_fields_block(payload, template_name)
+    extension_block = _render_extension_block(payload, template_name)
+    prompt = base_prompt + template_fields_block + extension_block
 
     secciones_finales = [prompt]
 

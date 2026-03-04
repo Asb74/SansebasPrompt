@@ -2044,7 +2044,8 @@ class PromptEngineUI:
 
         data["entradas"] = data.get("situacion", "")
         data["prioridad"] = data.get("urgencia", "") or "Media"
-        data["formato_salida"] = "Respuesta estructurada"
+        if not data.get("formato_salida", "").strip():
+            data["formato_salida"] = data.get("formato_entrega", "").strip() or "Respuesta estructurada"
 
         if data.get("contexto_detallado"):
             data["restricciones"] = f"{data.get('restricciones', '')}\nContexto adicional: {data['contexto_detallado']}".strip()

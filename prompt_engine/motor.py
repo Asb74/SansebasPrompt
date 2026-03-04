@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import Dict
 
@@ -53,6 +54,10 @@ def generar_prompt(
         "perfil_rol": perfil.get("rol", "Profesional"),
         "contexto_nombre": contexto.get("nombre", "General"),
         "contexto_rol": contexto.get("rol_contextual", "Asistente"),
+        "titulo": datos_tarea.get("titulo", ""),
+        "situacion": datos_tarea.get("situacion", ""),
+        "urgencia": datos_tarea.get("urgencia", ""),
+        "contexto_detallado": datos_tarea.get("contexto_detallado", ""),
         "objetivo": datos_tarea.get("objetivo", ""),
         "entradas": datos_tarea.get("entradas", ""),
         "restricciones": datos_tarea.get("restricciones", ""),
@@ -98,8 +103,21 @@ def generar_prompt(
     if contexto_extras_filtrados:
         payload["_contexto_extras"] = contexto_extras_filtrados
 
-    area = _normalizar_area(datos_tarea.get("area", ""))
-    if area == "it":
+    for key, value in datos_tarea.items():
+        if (
+            key in payload
+            or key in {"area", "adjuntos"}
+            or key.startswith("perfil_")
+            or key.startswith("contexto_")
+            or value is None
+        ):
+            continue
+        value_text = str(value).strip()
+        if value_text:
+            payload[key] = value_text
+
+    template_name = _normalizar_area(datos_tarea.get("area", ""))
+    if template_name == "it":
         payload.update(
             {
                 "stack": datos_tarea.get("stack", "Python 3.9+"),
@@ -111,7 +129,7 @@ def generar_prompt(
             if value is not None and str(value).strip():
                 payload[key] = str(value).strip()
         prompt = render_it(payload)
-    elif area == "ventas":
+    elif template_name == "ventas":
         payload.update(
             {
                 "segmento": datos_tarea.get("segmento", "B2B"),
@@ -119,7 +137,7 @@ def generar_prompt(
             }
         )
         prompt = render_ventas(payload)
-    elif area == "contabilidad":
+    elif template_name == "contabilidad":
         payload.update(
             {
                 "normativa": datos_tarea.get("normativa", "PGC"),
@@ -127,7 +145,7 @@ def generar_prompt(
             }
         )
         prompt = render_contabilidad(payload)
-    else:
+    elif template_name == "gestion":
         payload.update(
             {
                 "area_operativa": datos_tarea.get("area_operativa", "Operaciones"),
@@ -135,13 +153,22 @@ def generar_prompt(
             }
         )
         prompt = render_gestion(payload)
+    else:
+        try:
+            module = import_module(f"{__package__}.plantillas.{template_name}")
+            render_fn = getattr(module, "render_custom", None)
+            if not callable(render_fn):
+                render_fn = getattr(module, f"render_{template_name}", None)
+            prompt = render_fn(payload) if callable(render_fn) else render_gestion(payload)
+        except Exception:
+            prompt = render_gestion(payload)
 
     secciones_finales = [prompt]
 
     if adjuntos:
         secciones_finales.append(leer_archivos(adjuntos))
 
-    if area == "it":
+    if template_name == "it":
         secciones_finales.append(DIRECTRICES_TECNICAS_IT)
 
     return "\n\n".join(seccion for seccion in secciones_finales if seccion.strip())

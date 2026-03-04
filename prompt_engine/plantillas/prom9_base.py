@@ -20,13 +20,16 @@ def render_base(payload: Dict[str, str]) -> str:
         contexto_extras_block = f"[Datos adicionales del contexto]\n{contexto_extras_lines}\n"
 
     return f"""PROM-9™ | Base
-1) Perfil: {payload['perfil_nombre']} ({payload['perfil_rol']})
-2) Contexto: {payload['contexto_nombre']} - Rol contextual: {payload['contexto_rol']}
-{extras_block}{contexto_extras_block}3) Objetivo: {payload['objetivo']}
-4) Entradas clave: {payload['entradas']}
-5) Restricciones: {payload['restricciones']}
-6) Formato de salida: {payload['formato_salida']}
-7) Prioridad: {payload['prioridad']}
-8) Criterios de calidad: Claridad, precisión y accionabilidad.
-9) Instrucción final: Entrega una respuesta profesional y estructurada en español.
+1) Perfil: {payload.get('perfil_nombre', 'Usuario')} ({payload.get('perfil_rol', 'Profesional')})
+2) Contexto: {payload.get('contexto_nombre', 'General')} - Rol contextual: {payload.get('contexto_rol', 'Asistente')}
+{extras_block}{contexto_extras_block}3) Título: {payload.get('titulo', '')}
+4) Objetivo: {payload.get('objetivo', '')}
+5) Tipo de situación: {payload.get('situacion', '')}
+6) Urgencia: {payload.get('urgencia', '')}
+7) Contexto detallado: {payload.get('contexto_detallado', '')}
+8) Restricciones: {payload.get('restricciones', '')}
+9) Formato de salida: {payload.get('formato_salida', 'Respuesta estructurada')}
+10) Prioridad: {payload.get('prioridad', 'Media')}
+11) Criterios de calidad: Claridad, precisión y accionabilidad.
+12) Instrucción final: Entrega una respuesta profesional y estructurada en español.
 """

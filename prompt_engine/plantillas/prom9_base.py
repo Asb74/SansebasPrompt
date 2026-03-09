@@ -28,7 +28,7 @@ def render_base(payload: Dict[str, str]) -> str:
 6) Urgencia: {payload.get('urgencia', '')}
 7) Contexto detallado: {payload.get('contexto_detallado', '')}
 8) Restricciones: {payload.get('restricciones', '')}
-9) Formato de salida: {payload.get('formato_salida', 'Respuesta estructurada')}
+9) Formato de salida: {payload.get('formato_salida') or 'Respuesta estructurada'}
 10) Prioridad: {payload.get('prioridad', 'Media')}
 11) Criterios de calidad: Claridad, precisión y accionabilidad.
 12) Instrucción final: Entrega una respuesta profesional y estructurada en español.

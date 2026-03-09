@@ -2032,6 +2032,7 @@ class PromptEngineUI:
         widget.insert(0, text)
 
     def _collect_form_data(self) -> dict[str, str]:
+        self.root.update_idletasks()
         data = {"area": self.template_var.get()}
         for field, _ in BASE_FIELDS:
             data[field] = self._read_widget(self.base_widgets[field])
@@ -2042,13 +2043,28 @@ class PromptEngineUI:
         for field, entry in self.context_extra_widgets.items():
             data[field] = entry.get().strip()
 
-        data["entradas"] = data.get("situacion", "")
-        data["prioridad"] = data.get("urgencia", "") or "Media"
-        if not data.get("formato_salida", "").strip():
-            data["formato_salida"] = data.get("formato_entrega", "").strip() or "Respuesta estructurada"
+        contexto = self._selected_item(self.contextos, self.contexto_var.get()) or {}
+        enfoque_items = contexto.get("enfoque")
+        no_hacer_items = contexto.get("no_hacer")
 
-        if data.get("contexto_detallado"):
-            data["restricciones"] = f"{data.get('restricciones', '')}\nContexto adicional: {data['contexto_detallado']}".strip()
+        enfoque_text = "\n".join(item.strip() for item in enfoque_items if isinstance(item, str) and item.strip()) if isinstance(enfoque_items, list) else ""
+        no_hacer_text = "\n".join(item.strip() for item in no_hacer_items if isinstance(item, str) and item.strip()) if isinstance(no_hacer_items, list) else ""
+
+        if enfoque_text.strip():
+            enfoque_block = f"[Enfoque del contexto]\n{enfoque_text.strip()}"
+            if enfoque_block not in data["contexto_detallado"]:
+                if data["contexto_detallado"].strip():
+                    data["contexto_detallado"] = f"{data['contexto_detallado'].strip()}\n\n{enfoque_block}"
+                else:
+                    data["contexto_detallado"] = enfoque_block
+
+        if no_hacer_text.strip():
+            no_hacer_block = f"[No hacer del contexto]\n{no_hacer_text.strip()}"
+            if no_hacer_block not in data["restricciones"]:
+                if data["restricciones"].strip():
+                    data["restricciones"] = f"{data['restricciones'].strip()}\n\n{no_hacer_block}"
+                else:
+                    data["restricciones"] = no_hacer_block
 
         return data
 
@@ -2086,10 +2102,10 @@ class PromptEngineUI:
             contexto=contexto.get("nombre", "General"),
             area=data.get("area", "gestion"),
             objetivo=data.get("titulo") or data.get("objetivo", ""),
-            entradas=data.get("entradas", ""),
+            entradas=data.get("situacion", ""),
             restricciones=data.get("restricciones", ""),
             formato_salida=data.get("formato_salida", ""),
-            prioridad=data.get("prioridad", "Media"),
+            prioridad=data.get("urgencia", ""),
             payload_json=payload_json,
             prompt_generado=prompt,
         )
@@ -2152,10 +2168,10 @@ class PromptEngineUI:
                 contexto=self.contexto_var.get() or "General",
                 area=data.get("area", "gestion"),
                 objetivo=data.get("titulo") or data.get("objetivo", ""),
-                entradas=data.get("entradas", ""),
+                entradas=data.get("situacion", ""),
                 restricciones=data.get("restricciones", ""),
                 formato_salida=data.get("formato_salida", ""),
-                prioridad=data.get("prioridad", "Media"),
+                prioridad=data.get("urgencia", ""),
                 payload_json=json.dumps(data, ensure_ascii=False),
                 prompt_generado=prompt,
             )

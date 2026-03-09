@@ -84,6 +84,8 @@ def _render_template_fields_block(payload: Dict[str, Any], template_name: str) -
         else:
             value_text = str(value)
         label = str(field.get("label") or key)
+        if not value_text:
+            value_text = "(pendiente)"
         lineas.append(f"- {label}: {value_text}")
 
     return f"\n[Campos de plantilla: {template_name}]\n" + "\n".join(lineas) + "\n"
@@ -176,6 +178,10 @@ def generar_prompt(
         "formato_salida": datos_tarea.get("formato_salida", ""),
         "prioridad": datos_tarea.get("prioridad", ""),
     }
+
+    formato_entrega = str(datos_tarea.get("formato_entrega") or "").strip()
+    if not str(payload.get("formato_salida") or "").strip() and formato_entrega:
+        payload["formato_salida"] = formato_entrega
 
     extras_filtrados: dict[str, str] = {}
     extras_fields = perfil.get("extras_fields")
